@@ -5,3 +5,4 @@ PySocks>=1.7.1
 PyGithub>=2.1.1
 knock-subdomains @ git+https://github.com/guelfoweb/knock.git
 python-dotenv>=1.0.0
+tldextract>=5.1.0

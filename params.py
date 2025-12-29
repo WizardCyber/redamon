@@ -9,8 +9,11 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv(Path(__file__).parent / ".env")
 
-# Target domain for OSINT reconnaissance (e.g., "example.com" - no http/https)
-TARGET_DOMAIN = "devergolabs.com"
+# Target for RECON
+# Smart mode auto-detects target type:
+# - Root domain (e.g., "example.com"): full subdomain discovery + WHOIS + DNS + Nmap on all
+# - Subdomain (e.g., "www.example.com"): WHOIS on root, DNS + Nmap only on that subdomain
+TARGET_DOMAIN = "www.devergolabs.com"
 
 # Hide your real IP during subdomain enumeration (uses Tor + proxychains)
 # Requires: Tor running (sudo systemctl start tor) + proxychains4 installed
@@ -92,13 +95,16 @@ NMAP_SCAN_HOSTNAMES = True
 # GVM/OpenVAS Vulnerability Scanner Configuration
 # =============================================================================
 
-# Enable/disable GVM vulnerability scanning module
-GVM_ENABLED = True
+USE_RECON_FOR_TARGET=False
+GVM_IP_LIST=[]
+GVM_HOSTNAME_LIST=["www.devergolabs.com"]
 
 # GVM connection settings (for Docker deployment)
 GVM_SOCKET_PATH = "/run/gvmd/gvmd.sock"  # Unix socket path inside container
 GVM_USERNAME = "admin"
 GVM_PASSWORD = os.getenv("GVM_PASSWORD", "admin")  # Set in .env for security
+
+
 
 # Scan configuration preset:
 # - "Full and fast" - Comprehensive scan, good performance (recommended)

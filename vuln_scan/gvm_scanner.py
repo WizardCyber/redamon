@@ -30,8 +30,7 @@ from params import (
     GVM_SCAN_CONFIG,
     GVM_TASK_TIMEOUT,
     GVM_POLL_INTERVAL,
-    GVM_CLEANUP_AFTER_SCAN,
-    TARGET_DOMAIN,
+    GVM_CLEANUP_AFTER_SCAN
 )
 
 # GVM imports (handled gracefully if not installed)

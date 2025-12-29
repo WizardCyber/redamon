@@ -15,6 +15,7 @@ import sys
 import json
 from pathlib import Path
 from datetime import datetime
+import tldextract
 
 # Add project root to path for imports
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -40,6 +41,33 @@ from recon.nmap_scan import run_nmap_scan
 OUTPUT_DIR = Path(__file__).parent / "output"
 
 
+def parse_target(target: str) -> dict:
+    """
+    Parse target and determine if it's a root domain or subdomain.
+
+    Args:
+        target: Target string (e.g., "example.com" or "www.example.com")
+
+    Returns:
+        Dictionary with:
+        - target: original target
+        - root_domain: the root domain (e.g., "example.com")
+        - is_subdomain: True if target is a subdomain
+        - subdomain_part: the subdomain prefix (e.g., "www") or empty string
+    """
+    extracted = tldextract.extract(target)
+    root_domain = f"{extracted.domain}.{extracted.suffix}"
+
+    is_subdomain = bool(extracted.subdomain)
+
+    return {
+        "target": target,
+        "root_domain": root_domain,
+        "is_subdomain": is_subdomain,
+        "subdomain_part": extracted.subdomain
+    }
+
+
 def build_scan_type() -> str:
     """Build dynamic scan type based on enabled modules."""
     modules = ["domain_recon"]
@@ -56,39 +84,60 @@ def save_recon_file(data: dict, output_file: Path):
         json.dump(data, f, indent=2)
 
 
-def run_domain_recon(domain: str, anonymous: bool = False, bruteforce: bool = False) -> dict:
+def run_domain_recon(target: str, anonymous: bool = False, bruteforce: bool = False,
+                     target_info: dict = None) -> dict:
     """
     Run combined WHOIS + subdomain discovery + DNS resolution.
     Produces a single unified JSON file with incremental saves.
-    
+
+    Smart mode:
+    - If target is a root domain (e.g., "example.com"): full subdomain discovery
+    - If target is a subdomain (e.g., "www.example.com"): scan only that subdomain,
+      but perform WHOIS on the root domain
+
     Args:
-        domain: Target domain (e.g., "example.com")
+        target: Target domain or subdomain (e.g., "example.com" or "www.example.com")
         anonymous: Use Tor to hide real IP
-        bruteforce: Enable Knockpy bruteforce mode
-        
+        bruteforce: Enable Knockpy bruteforce mode (only for root domain mode)
+        target_info: Parsed target info from parse_target()
+
     Returns:
         Complete reconnaissance data including WHOIS and subdomains
     """
+    # Parse target if not provided
+    if target_info is None:
+        target_info = parse_target(target)
+
+    is_subdomain_mode = target_info["is_subdomain"]
+    root_domain = target_info["root_domain"]
+
     print("\n" + "=" * 70)
     print("               RedAmon - Domain Reconnaissance")
     print("=" * 70)
-    print(f"  Target: {domain}")
+    print(f"  Target: {target}")
+    if is_subdomain_mode:
+        print(f"  Mode: SUBDOMAIN ONLY (root domain: {root_domain})")
+    else:
+        print(f"  Mode: FULL DOMAIN SCAN")
     print(f"  Anonymous Mode: {anonymous}")
-    print(f"  Bruteforce Mode: {bruteforce}")
+    if not is_subdomain_mode:
+        print(f"  Bruteforce Mode: {bruteforce}")
     print("=" * 70 + "\n")
-    
+
     # Setup output file
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    output_file = OUTPUT_DIR / f"recon_{domain}.json"
-    
+    output_file = OUTPUT_DIR / f"recon_{target}.json"
+
     # Initialize result structure with dynamic scan_type and empty modules_executed
     combined_result = {
         "metadata": {
             "scan_type": build_scan_type(),
             "scan_timestamp": datetime.now().isoformat(),
-            "target_domain": domain,
+            "target": target,
+            "root_domain": root_domain,
+            "is_subdomain_mode": is_subdomain_mode,
             "anonymous_mode": anonymous,
-            "bruteforce_mode": bruteforce,
+            "bruteforce_mode": bruteforce if not is_subdomain_mode else False,
             "modules_executed": []
         },
         "whois": {},
@@ -96,54 +145,90 @@ def run_domain_recon(domain: str, anonymous: bool = False, bruteforce: bool = Fa
         "subdomain_count": 0,
         "dns": {}
     }
-    
-    # Step 1: WHOIS lookup
+
+    # Step 1: WHOIS lookup (always on root domain)
     print("[PHASE 1] WHOIS Lookup")
     print("-" * 40)
+    whois_target = root_domain
+    print(f"[*] Performing WHOIS on root domain: {whois_target}")
     try:
-        whois_result = whois_lookup(domain, save_output=False)
+        whois_result = whois_lookup(whois_target, save_output=False)
         combined_result["whois"] = whois_result.get("whois_data", {})
         print(f"[+] WHOIS data retrieved successfully")
     except Exception as e:
         print(f"[!] WHOIS lookup failed: {e}")
         combined_result["whois"] = {"error": str(e)}
-    
+
     combined_result["metadata"]["modules_executed"].append("whois")
     save_recon_file(combined_result, output_file)
     print(f"[+] Saved: {output_file}")
-    
+
     # Step 2: Subdomain discovery & DNS resolution
-    print(f"\n[PHASE 2] Subdomain Discovery & DNS Resolution")
-    print("-" * 40)
-    recon_result = discover_subdomains(
-        domain,
-        anonymous=anonymous,
-        bruteforce=bruteforce,
-        resolve=True,
-        save_output=False
-    )
-    
-    combined_result["subdomains"] = recon_result.get("subdomains", [])
-    combined_result["subdomain_count"] = recon_result.get("subdomain_count", 0)
-    combined_result["metadata"]["modules_executed"].append("subdomain_discovery")
+    if is_subdomain_mode:
+        # SUBDOMAIN MODE: Only scan the specific subdomain
+        print(f"\n[PHASE 2] Single Subdomain DNS Resolution")
+        print("-" * 40)
+        print(f"[*] Resolving DNS for: {target}")
+
+        # Import dns_lookup from domain_recon
+        from recon.domain_recon import dns_lookup
+
+        # Resolve only the specific subdomain
+        subdomain_dns = dns_lookup(target)
+
+        combined_result["subdomains"] = [target]
+        combined_result["subdomain_count"] = 1
+        combined_result["dns"] = {
+            "domain": {},  # No root domain DNS in subdomain mode
+            "subdomains": {
+                target: subdomain_dns
+            }
+        }
+
+        if subdomain_dns["ips"]["ipv4"] or subdomain_dns["ips"]["ipv6"]:
+            all_ips = subdomain_dns["ips"]["ipv4"] + subdomain_dns["ips"]["ipv6"]
+            print(f"[+] {target} -> {', '.join(all_ips)}")
+        else:
+            print(f"[-] {target}: No DNS records found")
+
+        combined_result["metadata"]["modules_executed"].append("dns_resolution")
+    else:
+        # FULL DOMAIN MODE: Discover all subdomains
+        print(f"\n[PHASE 2] Subdomain Discovery & DNS Resolution")
+        print("-" * 40)
+        recon_result = discover_subdomains(
+            target,
+            anonymous=anonymous,
+            bruteforce=bruteforce,
+            resolve=True,
+            save_output=False
+        )
+
+        combined_result["subdomains"] = recon_result.get("subdomains", [])
+        combined_result["subdomain_count"] = recon_result.get("subdomain_count", 0)
+        combined_result["metadata"]["modules_executed"].append("subdomain_discovery")
+        save_recon_file(combined_result, output_file)
+        print(f"[+] Saved: {output_file}")
+
+        # Step 3: DNS resolution (already done in discover_subdomains)
+        combined_result["dns"] = recon_result.get("dns", {})
+        combined_result["metadata"]["modules_executed"].append("dns_resolution")
+
     save_recon_file(combined_result, output_file)
     print(f"[+] Saved: {output_file}")
-    
-    # Step 3: DNS resolution (already done in discover_subdomains)
-    combined_result["dns"] = recon_result.get("dns", {})
-    combined_result["metadata"]["modules_executed"].append("dns_resolution")
-    save_recon_file(combined_result, output_file)
-    print(f"[+] Saved: {output_file}")
-    
+
     # Step 4: Nmap port scanning (enriches the data, saves incrementally)
     if NMAP_ENABLED:
         combined_result = run_nmap_scan(combined_result, output_file=output_file)
         combined_result["metadata"]["modules_executed"].append("nmap_scan")
         save_recon_file(combined_result, output_file)
-    
+
     print(f"\n{'=' * 70}")
     print(f"[+] DOMAIN RECON COMPLETE")
-    print(f"[+] Subdomains found: {combined_result['subdomain_count']}")
+    if is_subdomain_mode:
+        print(f"[+] Mode: Subdomain only ({target})")
+    else:
+        print(f"[+] Subdomains found: {combined_result['subdomain_count']}")
     if NMAP_ENABLED and "nmap" in combined_result:
         nmap_data = combined_result["nmap"]
         summary = nmap_data.get("summary", {})
@@ -151,7 +236,7 @@ def run_domain_recon(domain: str, anonymous: bool = False, bruteforce: bool = Fa
         print(f"[+] Open ports found: {total_ports}")
     print(f"[+] Output saved: {output_file}")
     print(f"{'=' * 70}")
-    
+
     return combined_result
 
 
@@ -186,6 +271,10 @@ def run_github_recon(token: str, target: str) -> list:
 def main():
     """
     Main entry point - runs the complete recon pipeline.
+
+    Smart target detection:
+    - If TARGET_DOMAIN is a root domain (e.g., "example.com"): full subdomain discovery
+    - If TARGET_DOMAIN is a subdomain (e.g., "www.example.com"): scan only that subdomain
     """
     print("\n")
     print("╔" + "═" * 68 + "╗")
@@ -193,9 +282,22 @@ def main():
     print("║" + " " * 15 + "Automated Reconnaissance Pipeline" + " " * 18 + "║")
     print("╚" + "═" * 68 + "╝")
     print()
-    
+
     start_time = datetime.now()
-    
+
+    # Parse target to determine if it's a subdomain or root domain
+    target_info = parse_target(TARGET_DOMAIN)
+    is_subdomain_mode = target_info["is_subdomain"]
+
+    print(f"[*] Target: {TARGET_DOMAIN}")
+    if is_subdomain_mode:
+        print(f"[*] Detected: SUBDOMAIN (root domain: {target_info['root_domain']})")
+        print(f"[*] Mode: Scanning only this specific subdomain")
+    else:
+        print(f"[*] Detected: ROOT DOMAIN")
+        print(f"[*] Mode: Full subdomain discovery")
+    print()
+
     # Check anonymity status if Tor is enabled
     if USE_TOR_FOR_RECON:
         try:
@@ -203,33 +305,39 @@ def main():
             print_anonymity_status()
         except ImportError:
             print("[!] Anonymity module not found, proceeding without Tor status check")
-    
+
     # Phase 1 & 2: Domain recon (WHOIS + Subdomains + DNS) - Combined JSON
     domain_result = run_domain_recon(
         TARGET_DOMAIN,
         anonymous=USE_TOR_FOR_RECON,
-        bruteforce=USE_BRUTEFORCE_FOR_SUBDOMAINS
+        bruteforce=USE_BRUTEFORCE_FOR_SUBDOMAINS,
+        target_info=target_info
     )
-    
+
     # Phase 3: GitHub secret hunt - Separate JSON (if enabled)
     github_findings = []
     if GITHUB_HUNTER_ENABLED:
         github_findings = run_github_recon(GITHUB_ACCESS_TOKEN, GITHUB_TARGET_ORG)
     else:
         print("\n[*] GitHub Secret Hunt: DISABLED (set GITHUB_HUNTER_ENABLED=True to enable)")
-    
+
     # Final summary
     end_time = datetime.now()
     duration = (end_time - start_time).total_seconds()
-    
+
     print("\n")
     print("╔" + "═" * 68 + "╗")
     print("║" + " " * 22 + "RECON PIPELINE COMPLETE" + " " * 23 + "║")
     print("╠" + "═" * 68 + "╣")
     print(f"║  Duration: {duration:.2f} seconds" + " " * (55 - len(f"{duration:.2f}")) + "║")
-    print(f"║  Domain: {TARGET_DOMAIN}" + " " * (58 - len(TARGET_DOMAIN)) + "║")
-    print(f"║  Subdomains found: {domain_result['subdomain_count']}" + " " * (48 - len(str(domain_result['subdomain_count']))) + "║")
-    
+    print(f"║  Target: {TARGET_DOMAIN}" + " " * (58 - len(TARGET_DOMAIN)) + "║")
+    if is_subdomain_mode:
+        print(f"║  Mode: Subdomain only" + " " * 46 + "║")
+        print(f"║  Root domain: {target_info['root_domain']}" + " " * (53 - len(target_info['root_domain'])) + "║")
+    else:
+        print(f"║  Mode: Full domain scan" + " " * 44 + "║")
+        print(f"║  Subdomains found: {domain_result['subdomain_count']}" + " " * (48 - len(str(domain_result['subdomain_count']))) + "║")
+
     # Nmap stats
     if NMAP_ENABLED and "nmap" in domain_result:
         nmap_data = domain_result["nmap"]
@@ -242,18 +350,21 @@ def main():
     else:
         nmap_status = "DISABLED" if not NMAP_ENABLED else "N/A"
         print(f"║  Nmap scan: {nmap_status}" + " " * (55 - len(nmap_status)) + "║")
-    
+
     github_status = str(len(github_findings)) if GITHUB_HUNTER_ENABLED else "DISABLED"
     print(f"║  GitHub findings: {github_status}" + " " * (49 - len(github_status)) + "║")
     print("╠" + "═" * 68 + "╣")
     print("║  Output Files:" + " " * 53 + "║")
     nmap_suffix = " + Nmap" if NMAP_ENABLED else ""
-    print(f"║    • recon_{TARGET_DOMAIN}.json (WHOIS + DNS + Subs{nmap_suffix})" + " " * max(0, 12 - len(TARGET_DOMAIN) - len(nmap_suffix)) + "║")
+    if is_subdomain_mode:
+        print(f"║    • recon_{TARGET_DOMAIN}.json (WHOIS + DNS{nmap_suffix})" + " " * max(0, 18 - len(TARGET_DOMAIN) - len(nmap_suffix)) + "║")
+    else:
+        print(f"║    • recon_{TARGET_DOMAIN}.json (WHOIS + DNS + Subs{nmap_suffix})" + " " * max(0, 12 - len(TARGET_DOMAIN) - len(nmap_suffix)) + "║")
     if GITHUB_HUNTER_ENABLED:
         print(f"║    • github_secrets_{GITHUB_TARGET_ORG}.json" + " " * max(0, 24 - len(GITHUB_TARGET_ORG)) + "║")
     print("╚" + "═" * 68 + "╝")
     print()
-    
+
     return 0
 
 

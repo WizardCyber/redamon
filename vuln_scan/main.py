@@ -26,7 +26,6 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from params import (
     TARGET_DOMAIN,
-    GVM_ENABLED,
     GVM_SCAN_TARGETS,
     GVM_CLEANUP_AFTER_SCAN,
 )
@@ -225,10 +224,6 @@ def run_vulnerability_scan(
 
 def main():
     """Main entry point."""
-    if not GVM_ENABLED:
-        print("[*] GVM vulnerability scanning: DISABLED")
-        print("[*] Enable in params.py: GVM_ENABLED = True")
-        return 0
     
     # Run the scan
     start_time = datetime.now()

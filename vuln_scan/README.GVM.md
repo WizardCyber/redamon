@@ -517,9 +517,6 @@ Example: `202512240705` = December 24, 2025 at 07:05 UTC
 # GVM/OpenVAS Vulnerability Scanner Configuration
 # =============================================================================
 
-# Enable/disable GVM vulnerability scanning module
-GVM_ENABLED = True
-
 # GVM connection settings (for Docker deployment)
 GVM_SOCKET_PATH = "/run/gvmd/gvmd.sock"  # Unix socket path inside container
 GVM_USERNAME = "admin"
@@ -548,7 +545,6 @@ GVM_CLEANUP_AFTER_SCAN = True
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `GVM_ENABLED` | bool | `True` | Master switch for vulnerability scanning |
 | `GVM_SOCKET_PATH` | str | `/run/gvmd/gvmd.sock` | Path to GVMD Unix socket |
 | `GVM_USERNAME` | str | `admin` | GVM authentication username |
 | `GVM_PASSWORD` | str | `admin` | GVM authentication password (use .env) |
