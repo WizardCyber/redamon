@@ -120,10 +120,6 @@ export default function GraphPage() {
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 })
-  // Hover highlighting state - using refs to avoid re-renders that block zoom/interactions
-  const hoverNodeRef = useRef<GraphNode | null>(null)
-  const highlightNodesRef = useRef<Set<string>>(new Set())
-  const highlightLinksRef = useRef<Set<GraphLink>>(new Set())
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const graphRef = useRef<any>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -306,67 +302,6 @@ export default function GraphPage() {
     setSelectedNode(null)
   }, [])
 
-  // Handle node hover - highlight connected nodes and links
-  // Uses refs to avoid re-renders that block zoom/pan interactions
-  const handleNodeHover = useCallback((node: GraphNode | null) => {
-    hoverNodeRef.current = node
-
-    if (!node || !data) {
-      highlightNodesRef.current = new Set()
-      highlightLinksRef.current = new Set()
-      return
-    }
-
-    const newHighlightNodes = new Set<string>()
-    const newHighlightLinks = new Set<GraphLink>()
-
-    // Add the hovered node
-    newHighlightNodes.add(node.id)
-
-    // Find all connected links and neighbor nodes
-    data.links.forEach(link => {
-      const sourceId = typeof link.source === 'string' ? link.source : (link.source as GraphNode).id
-      const targetId = typeof link.target === 'string' ? link.target : (link.target as GraphNode).id
-
-      if (sourceId === node.id || targetId === node.id) {
-        newHighlightLinks.add(link)
-
-        // Add neighbor nodes
-        const neighborId = sourceId === node.id ? targetId : sourceId
-        newHighlightNodes.add(neighborId)
-      }
-    })
-
-    highlightNodesRef.current = newHighlightNodes
-    highlightLinksRef.current = newHighlightLinks
-  }, [data])
-
-  // Handle link hover - highlight the link and its source/target nodes
-  const handleLinkHover = useCallback((link: GraphLink | null) => {
-    if (!link || !data) {
-      highlightNodesRef.current = new Set()
-      highlightLinksRef.current = new Set()
-      hoverNodeRef.current = null
-      return
-    }
-
-    const newHighlightNodes = new Set<string>()
-    const newHighlightLinks = new Set<GraphLink>()
-
-    newHighlightLinks.add(link)
-
-    // Add source and target nodes
-    const sourceId = typeof link.source === 'string' ? link.source : (link.source as GraphNode).id
-    const targetId = typeof link.target === 'string' ? link.target : (link.target as GraphNode).id
-
-    newHighlightNodes.add(sourceId)
-    newHighlightNodes.add(targetId)
-
-    highlightNodesRef.current = newHighlightNodes
-    highlightLinksRef.current = newHighlightLinks
-    hoverNodeRef.current = null
-  }, [data])
-
   return (
     <main className={styles.main}>
       <header className={styles.header}>
@@ -441,21 +376,33 @@ export default function GraphPage() {
               nodeRelSize={6}
               linkLabel={(link) => (link as GraphLink).type}
               linkColor={(link) => {
+                if (!selectedNode) return '#374151'
                 const graphLink = link as GraphLink
-                return highlightLinksRef.current.has(graphLink) ? '#60a5fa' : '#374151'
+                const sourceId = typeof graphLink.source === 'string' ? graphLink.source : (graphLink.source as GraphNode).id
+                const targetId = typeof graphLink.target === 'string' ? graphLink.target : (graphLink.target as GraphNode).id
+                return (sourceId === selectedNode.id || targetId === selectedNode.id) ? '#60a5fa' : '#374151'
               }}
               linkDirectionalArrowColor={(link) => {
+                if (!selectedNode) return '#374151'
                 const graphLink = link as GraphLink
-                return highlightLinksRef.current.has(graphLink) ? '#60a5fa' : '#374151'
+                const sourceId = typeof graphLink.source === 'string' ? graphLink.source : (graphLink.source as GraphNode).id
+                const targetId = typeof graphLink.target === 'string' ? graphLink.target : (graphLink.target as GraphNode).id
+                return (sourceId === selectedNode.id || targetId === selectedNode.id) ? '#60a5fa' : '#374151'
               }}
               linkWidth={(link) => {
+                if (!selectedNode) return 1
                 const graphLink = link as GraphLink
-                return highlightLinksRef.current.has(graphLink) ? 3 : 1
+                const sourceId = typeof graphLink.source === 'string' ? graphLink.source : (graphLink.source as GraphNode).id
+                const targetId = typeof graphLink.target === 'string' ? graphLink.target : (graphLink.target as GraphNode).id
+                return (sourceId === selectedNode.id || targetId === selectedNode.id) ? 3 : 1
               }}
               linkDirectionalParticles={4}
               linkDirectionalParticleWidth={(link) => {
+                if (!selectedNode) return 0
                 const graphLink = link as GraphLink
-                return highlightLinksRef.current.has(graphLink) ? 4 : 0
+                const sourceId = typeof graphLink.source === 'string' ? graphLink.source : (graphLink.source as GraphNode).id
+                const targetId = typeof graphLink.target === 'string' ? graphLink.target : (graphLink.target as GraphNode).id
+                return (sourceId === selectedNode.id || targetId === selectedNode.id) ? 4 : 0
               }}
               linkDirectionalParticleColor={() => '#60a5fa'}
               linkDirectionalArrowLength={4}
@@ -468,15 +415,11 @@ export default function GraphPage() {
               cooldownTime={Infinity}
               cooldownTicks={Infinity}
               onNodeClick={(node) => handleNodeClick(node as GraphNode)}
-              onNodeHover={(node) => handleNodeHover(node as GraphNode | null)}
-              onLinkHover={(link) => handleLinkHover(link as GraphLink | null)}
               nodeCanvasObject={(node, ctx, globalScale) => {
                 const graphNode = node as GraphNode & { x: number; y: number }
                 const baseSize = 6
                 const nodeSize = baseSize * getNodeSize(graphNode)
                 const color = getNodeColor(graphNode)
-                const isHighlighted = highlightNodesRef.current.has(graphNode.id) || selectedNode?.id === graphNode.id
-                const isHovered = hoverNodeRef.current?.id === graphNode.id
                 const isSelected = selectedNode?.id === graphNode.id
 
                 // Draw selection marker (outer ring) for selected node
@@ -485,15 +428,6 @@ export default function GraphPage() {
                   ctx.arc(graphNode.x, graphNode.y, nodeSize + 6, 0, 2 * Math.PI)
                   ctx.strokeStyle = '#22c55e' // Green for selected
                   ctx.lineWidth = 3
-                  ctx.stroke()
-                }
-
-                // Draw highlight ring for hovered/connected nodes
-                if (isHighlighted && !isSelected) {
-                  ctx.beginPath()
-                  ctx.arc(graphNode.x, graphNode.y, nodeSize + 4, 0, 2 * Math.PI)
-                  ctx.strokeStyle = isHovered ? '#fbbf24' : '#60a5fa'
-                  ctx.lineWidth = 2
                   ctx.stroke()
                 }
 
@@ -530,8 +464,8 @@ export default function GraphPage() {
                 ctx.fillStyle = color
                 ctx.fill()
 
-                // Draw label if enabled or if node is highlighted
-                if ((showLabels && globalScale > 0.4) || isHighlighted) {
+                // Draw label if enabled or if node is selected
+                if ((showLabels && globalScale > 0.4) || isSelected) {
                   const label = graphNode.name
                   const fontSize = Math.max(6 / globalScale, 2)
                   ctx.font = `${fontSize}px Sans-Serif`
@@ -561,16 +495,25 @@ export default function GraphPage() {
               nodeOpacity={1}
               linkLabel={(link) => (link as GraphLink).type}
               linkColor={(link) => {
+                if (!selectedNode) return '#4b5563'
                 const graphLink = link as GraphLink
-                return highlightLinksRef.current.has(graphLink) ? '#60a5fa' : '#4b5563'
+                const sourceId = typeof graphLink.source === 'string' ? graphLink.source : (graphLink.source as GraphNode).id
+                const targetId = typeof graphLink.target === 'string' ? graphLink.target : (graphLink.target as GraphNode).id
+                return (sourceId === selectedNode.id || targetId === selectedNode.id) ? '#60a5fa' : '#4b5563'
               }}
               linkWidth={(link) => {
+                if (!selectedNode) return 1
                 const graphLink = link as GraphLink
-                return highlightLinksRef.current.has(graphLink) ? 3 : 1
+                const sourceId = typeof graphLink.source === 'string' ? graphLink.source : (graphLink.source as GraphNode).id
+                const targetId = typeof graphLink.target === 'string' ? graphLink.target : (graphLink.target as GraphNode).id
+                return (sourceId === selectedNode.id || targetId === selectedNode.id) ? 3 : 1
               }}
               linkDirectionalParticles={(link) => {
+                if (!selectedNode) return 0
                 const graphLink = link as GraphLink
-                return highlightLinksRef.current.has(graphLink) ? 4 : 0
+                const sourceId = typeof graphLink.source === 'string' ? graphLink.source : (graphLink.source as GraphNode).id
+                const targetId = typeof graphLink.target === 'string' ? graphLink.target : (graphLink.target as GraphNode).id
+                return (sourceId === selectedNode.id || targetId === selectedNode.id) ? 4 : 0
               }}
               linkDirectionalParticleWidth={4}
               linkDirectionalParticleColor={() => '#60a5fa'}
@@ -580,8 +523,6 @@ export default function GraphPage() {
               width={dimensions.width}
               height={dimensions.height}
               onNodeClick={(node) => handleNodeClick(node as GraphNode)}
-              onNodeHover={(node) => handleNodeHover(node as GraphNode | null)}
-              onLinkHover={(link) => handleLinkHover(link as GraphLink | null)}
               nodeThreeObject={(node: object) => {
                 const graphNode = node as GraphNode
                 const THREE = require('three')
@@ -594,8 +535,6 @@ export default function GraphPage() {
                 const sphereSize = baseSize * getNodeSize(graphNode)
                 const nodeColor = getNodeColor(graphNode)
                 const isSelected = selectedNode?.id === graphNode.id
-                const isHighlighted = highlightNodesRef.current.has(graphNode.id)
-                const isHovered = hoverNodeRef.current?.id === graphNode.id
 
                 // Add selection marker ring (green) for selected node
                 if (isSelected) {
@@ -609,20 +548,6 @@ export default function GraphPage() {
                   const selectRing = new THREE.Mesh(selectGeometry, selectMaterial)
                   selectRing.lookAt(0, 0, 1)
                   group.add(selectRing)
-                }
-
-                // Add highlight ring for hovered/connected nodes (not selected)
-                if (isHighlighted && !isSelected) {
-                  const highlightGeometry = new THREE.RingGeometry(sphereSize * 1.3, sphereSize * 1.5, 32)
-                  const highlightMaterial = new THREE.MeshBasicMaterial({
-                    color: isHovered ? '#fbbf24' : '#60a5fa',
-                    transparent: true,
-                    opacity: 0.8,
-                    side: THREE.DoubleSide,
-                  })
-                  const highlightRing = new THREE.Mesh(highlightGeometry, highlightMaterial)
-                  highlightRing.lookAt(0, 0, 1)
-                  group.add(highlightRing)
                 }
 
                 // Add outer glow ring for high/critical severity
@@ -657,8 +582,8 @@ export default function GraphPage() {
                 const sphere = new THREE.Mesh(geometry, material)
                 group.add(sphere)
 
-                // Create label if enabled or if node is highlighted/selected
-                if (showLabels || isHighlighted || isSelected) {
+                // Create label if enabled or if node is selected
+                if (showLabels || isSelected) {
                   const sprite = new SpriteText(graphNode.name)
                   sprite.color = '#ffffff'
                   sprite.textHeight = 3
