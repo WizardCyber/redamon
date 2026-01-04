@@ -36,6 +36,37 @@ interface GraphData {
   projectId: string
 }
 
+// Helper to format Neo4j datetime objects to readable string
+function formatNeo4jDateTime(value: unknown): string | null {
+  if (
+    typeof value === 'object' &&
+    value !== null &&
+    'year' in value &&
+    'month' in value &&
+    'day' in value &&
+    'hour' in value &&
+    'minute' in value &&
+    'second' in value
+  ) {
+    const dt = value as {
+      year: { low: number }
+      month: { low: number }
+      day: { low: number }
+      hour: { low: number }
+      minute: { low: number }
+      second: { low: number }
+    }
+    const year = dt.year.low
+    const month = String(dt.month.low).padStart(2, '0')
+    const day = String(dt.day.low).padStart(2, '0')
+    const hour = String(dt.hour.low).padStart(2, '0')
+    const minute = String(dt.minute.low).padStart(2, '0')
+    const second = String(dt.second.low).padStart(2, '0')
+    return `${year}-${month}-${day} ${hour}:${minute}:${second}`
+  }
+  return null
+}
+
 const NODE_COLORS: Record<string, string> = {
   Domain: '#3b82f6',
   Subdomain: '#8b5cf6',
@@ -611,11 +642,7 @@ export default function GraphPage() {
             {selectedNode && (
               <>
                 <div className={styles.drawerSection}>
-                  <h3 className={styles.drawerSectionTitle}>Basic Info</h3>
-                  <div className={styles.propertyRow}>
-                    <span className={styles.propertyKey}>ID</span>
-                    <span className={styles.propertyValue}>{selectedNode.id}</span>
-                  </div>
+                  <h3 className={styles.drawerSectionTitleBasicInfo}>Basic Info</h3>
                   <div className={styles.propertyRow}>
                     <span className={styles.propertyKey}>Type</span>
                     <span
@@ -626,23 +653,64 @@ export default function GraphPage() {
                     </span>
                   </div>
                   <div className={styles.propertyRow}>
+                    <span className={styles.propertyKey}>ID</span>
+                    <span className={styles.propertyValue}>{selectedNode.id}</span>
+                  </div>
+                  <div className={styles.propertyRow}>
                     <span className={styles.propertyKey}>Name</span>
                     <span className={styles.propertyValue}>{selectedNode.name}</span>
                   </div>
                 </div>
 
                 <div className={styles.drawerSection}>
-                  <h3 className={styles.drawerSectionTitle}>Properties</h3>
-                  {Object.entries(selectedNode.properties || {}).map(([key, value]) => (
-                    <div key={key} className={styles.propertyRow}>
-                      <span className={styles.propertyKey}>{key}</span>
-                      <span className={styles.propertyValue}>
-                        {typeof value === 'object'
-                          ? JSON.stringify(value, null, 2)
-                          : String(value)}
-                      </span>
-                    </div>
-                  ))}
+                  <h3 className={styles.drawerSectionTitleProperties}>Properties</h3>
+                  {Object.entries(selectedNode.properties || {})
+                    .sort(([a], [b]) => {
+                      const bottomKeys = ['created_at', 'updated_at']
+                      const aIsBottom = bottomKeys.includes(a)
+                      const bIsBottom = bottomKeys.includes(b)
+                      if (aIsBottom && !bIsBottom) return 1
+                      if (!aIsBottom && bIsBottom) return -1
+                      if (aIsBottom && bIsBottom) return bottomKeys.indexOf(a) - bottomKeys.indexOf(b)
+                      return 0
+                    })
+                    .map(([key, value]) => {
+                    const formattedDate = formatNeo4jDateTime(value)
+
+                    // Format the display value
+                    let displayValue: React.ReactNode
+                    if (formattedDate) {
+                      displayValue = formattedDate
+                    } else if (
+                      value === null ||
+                      value === undefined ||
+                      value === 'none' ||
+                      value === 'None' ||
+                      value === 'null' ||
+                      value === 'NULL'
+                    ) {
+                      displayValue = '---'
+                    } else if (Array.isArray(value)) {
+                      if (value.length === 0) {
+                        displayValue = '---'
+                      } else {
+                        displayValue = value.join(', ')
+                      }
+                    } else if (typeof value === 'object') {
+                      displayValue = JSON.stringify(value, null, 2)
+                    } else if (value === '') {
+                      displayValue = '---'
+                    } else {
+                      displayValue = String(value)
+                    }
+
+                    return (
+                      <div key={key} className={styles.propertyRow}>
+                        <span className={styles.propertyKey}>{key}</span>
+                        <span className={styles.propertyValue}>{displayValue}</span>
+                      </div>
+                    )
+                  })}
                   {Object.keys(selectedNode.properties || {}).length === 0 && (
                     <p className={styles.emptyProperties}>No additional properties</p>
                   )}
