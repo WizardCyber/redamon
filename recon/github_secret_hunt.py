@@ -36,7 +36,7 @@ except ImportError:
     print("[!] PyGithub not installed. Run: pip install PyGithub")
     sys.exit(1)
 
-from params import (
+from recon.params import (
     GITHUB_ACCESS_TOKEN,
     GITHUB_TARGET_ORG,
     GITHUB_SCAN_MEMBERS,

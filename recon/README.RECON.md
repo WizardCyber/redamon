@@ -1,4 +1,4 @@
-# RedAmon
+# RedAmon Reconnaissance Module
 
 **Unmask the hidden before the world does.**
 
@@ -6,22 +6,257 @@ An automated OSINT reconnaissance and vulnerability scanning framework combining
 
 ---
 
-## 🎯 Quick Start
+## 🐳 Docker Quick Start (Recommended)
+
+The recon module is fully containerized. All tools run inside Docker containers.
 
 ```bash
-# 1. Install requirements
-pip install -r requirements.txt
-sudo apt install tor proxychains4  # Optional: for anonymous scanning
+# 1. Configure target in recon/params.py
+TARGET_DOMAIN = "testphp.vulnweb.com"    # Root domain to scan
+SUBDOMAIN_LIST = []                       # Empty = discover all subdomains
 
-# 2. Configure target in params.py
-TARGET_DOMAIN = "example.com"    # Root domain to scan
-SUBDOMAIN_LIST = []              # Empty = discover all subdomains
-# OR filter specific subdomains:
-SUBDOMAIN_LIST = ["www.", "api."]  # Only scan www.example.com and api.example.com
+# 2. Build and run with Docker Compose
+cd recon/
+docker-compose up --build
 
-# 3. Run the scan
-python recon/main.py
+# Or run in background
+docker-compose up -d --build
+docker-compose logs -f recon
+
+# Stop the container
+docker-compose down
 ```
+
+### Running Scans
+
+```bash
+# First time: build and run
+docker-compose build --network=host
+docker-compose up
+
+# Run again (already built)
+docker-compose up
+
+# Run in background
+docker-compose up -d
+docker-compose logs -f recon
+
+# Re-run after scan completed
+docker-compose down
+docker-compose up
+
+# Run manually inside container
+docker-compose run --rm recon python /app/recon/main.py
+```
+
+### Docker Environment Variables
+
+Override `params.py` settings via environment variables:
+
+```bash
+# Run with custom target
+TARGET_DOMAIN=example.com docker-compose up --build
+
+# Run with Tor anonymity
+USE_TOR_FOR_RECON=true docker-compose up --build
+
+# Run specific modules only
+SCAN_MODULES="domain_discovery,port_scan,http_probe" docker-compose up --build
+```
+
+### Shared Output Volume
+
+Scan results are stored in a shared Docker volume (`redamon-recon-output`) that can be accessed by other containers (e.g., GVM scanner):
+
+```bash
+# View results from host
+ls recon/output/
+
+# Mount in another container (e.g., gvm_scan)
+# In gvm_scan/docker-compose.yml:
+volumes:
+  - redamon-recon-output:/data/recon-output:ro
+```
+
+### Rebuilding After Code Changes
+
+When you modify Python code, you need to rebuild the container:
+
+```bash
+# Rebuild and run (recommended after code changes)
+docker-compose up --build
+
+# Force rebuild without cache (use after major changes)
+docker-compose build --no-cache
+docker-compose up
+
+# Quick rebuild (only changed layers)
+docker-compose build
+docker-compose up
+```
+
+**When to rebuild:**
+
+| Change Type | Action Required |
+|-------------|-----------------|
+| `params.py` changes | No rebuild needed (mounted as volume) |
+| Python code (*.py) changes | `docker-compose up --build` |
+| `requirements.txt` changes | `docker-compose build --no-cache` |
+| `Dockerfile` changes | `docker-compose build --no-cache` |
+| `.env` file changes | No rebuild needed (mounted as volume) |
+
+**Development workflow:**
+
+```bash
+# 1. Make code changes
+vim recon/vuln_scan.py
+
+# 2. Rebuild and test
+docker-compose up --build
+
+# 3. View logs in real-time
+docker-compose logs -f recon
+
+# 4. Stop when done
+docker-compose down
+```
+
+---
+
+## 🏗️ Docker-in-Docker Architecture
+
+The recon module uses a **Docker-in-Docker (DinD)** pattern where the main recon container orchestrates sibling containers for each scanning tool.
+
+### How It Works
+
+The recon container doesn't run Docker *inside* itself. Instead, it shares the **host's Docker daemon** via a socket mount:
+
+```yaml
+volumes:
+  - /var/run/docker.sock:/var/run/docker.sock:ro
+```
+
+This means all containers (recon, httpx, naabu, nuclei, etc.) are **siblings** managed by the same host Docker daemon.
+
+### Architecture Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              HOST MACHINE                                    │
+│                                                                              │
+│  ┌────────────────────────────────────────────────────────────────────────┐  │
+│  │                     Docker Daemon (dockerd)                            │  │
+│  │                    /var/run/docker.sock                                │  │
+│  └────────────────────────────────────────────────────────────────────────┘  │
+│         ▲              ▲              ▲              ▲              ▲         │
+│         │              │              │              │              │         │
+│    (socket)       (socket)       (socket)       (socket)       (socket)      │
+│         │              │              │              │              │         │
+│  ┌──────┴─────┐ ┌──────┴─────┐ ┌──────┴─────┐ ┌──────┴─────┐ ┌──────┴─────┐  │
+│  │  redamon-  │ │   naabu    │ │   httpx    │ │   nuclei   │ │   katana   │  │
+│  │   recon    │ │ container  │ │ container  │ │ container  │ │ container  │  │
+│  │            │ │            │ │            │ │            │ │            │  │
+│  │ Python     │ │ Port       │ │ HTTP       │ │ Vuln       │ │ Web        │  │
+│  │ Orchestr.  │ │ Scanner    │ │ Prober     │ │ Scanner    │ │ Crawler    │  │
+│  └────────────┘ └────────────┘ └────────────┘ └────────────┘ └────────────┘  │
+│        │                                                                      │
+│        │ runs via subprocess:                                                │
+│        │   docker run projectdiscovery/naabu ...                             │
+│        │   docker run projectdiscovery/httpx ...                             │
+│        │   docker run projectdiscovery/nuclei ...                            │
+│        │                                                                      │
+│  ┌─────┴──────────────────────────────────────────────────────────────────┐  │
+│  │                    Shared Volume: recon/output/                        │  │
+│  │                         recon_<domain>.json                            │  │
+│  └────────────────────────────────────────────────────────────────────────┘  │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Scan Workflow
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           SCAN WORKFLOW                                      │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  1. START                                                                    │
+│     │                                                                        │
+│     ▼                                                                        │
+│  ┌──────────────────┐                                                        │
+│  │ redamon-recon    │  Main orchestrator container starts                    │
+│  │ container starts │  Reads params.py, checks Docker socket                 │
+│  └────────┬─────────┘                                                        │
+│           │                                                                  │
+│           ▼                                                                  │
+│  2. DOMAIN DISCOVERY (Python native)                                         │
+│     │ • WHOIS lookup                                                         │
+│     │ • Knockpy subdomain enumeration                                        │
+│     │ • DNS resolution                                                       │
+│     │                                                                        │
+│     ▼                                                                        │
+│  3. PORT SCAN                                                                │
+│     │                                                                        │
+│     │  ┌─────────────────────────────────────────────────────────┐           │
+│     │  │ docker run --rm projectdiscovery/naabu:latest          │           │
+│     │  │   -host <targets> -top-ports 1000 -json                │           │
+│     │  └─────────────────────────────────────────────────────────┘           │
+│     │                                                                        │
+│     ▼                                                                        │
+│  4. HTTP PROBE                                                               │
+│     │                                                                        │
+│     │  ┌─────────────────────────────────────────────────────────┐           │
+│     │  │ docker run --rm projectdiscovery/httpx:latest          │           │
+│     │  │   -l <targets> -json -tech-detect -tls-grab            │           │
+│     │  └─────────────────────────────────────────────────────────┘           │
+│     │                                                                        │
+│     ▼                                                                        │
+│  5. RESOURCE ENUMERATION (parallel)                                          │
+│     │                                                                        │
+│     │  ┌─────────────────────┐  ┌─────────────────────┐                      │
+│     │  │ docker run katana  │  │ docker run gau      │                      │
+│     │  │ (active crawling)  │  │ (passive URLs)      │                      │
+│     │  └─────────────────────┘  └─────────────────────┘                      │
+│     │           │                        │                                   │
+│     │           └────────┬───────────────┘                                   │
+│     │                    ▼                                                   │
+│     │            Merge & deduplicate URLs                                    │
+│     │                                                                        │
+│     ▼                                                                        │
+│  6. VULNERABILITY SCAN                                                       │
+│     │                                                                        │
+│     │  ┌─────────────────────────────────────────────────────────┐           │
+│     │  │ docker run --rm projectdiscovery/nuclei:latest         │           │
+│     │  │   -l <urls> -severity critical,high,medium,low -json   │           │
+│     │  └─────────────────────────────────────────────────────────┘           │
+│     │                                                                        │
+│     ▼                                                                        │
+│  7. OUTPUT                                                                   │
+│     │                                                                        │
+│     └──► recon/output/recon_<domain>.json                                    │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Why Docker-in-Docker?
+
+| Benefit | Description |
+|---------|-------------|
+| **Isolation** | Each tool runs in its own container with minimal dependencies |
+| **Consistency** | Same tool versions regardless of host OS |
+| **No host pollution** | Go binaries (naabu, httpx, nuclei) don't need to be installed on host |
+| **Easy updates** | Just pull new Docker images to update tools |
+| **Portability** | Works on any system with Docker installed |
+
+### Tool Containers Used
+
+| Tool | Docker Image | Purpose |
+|------|--------------|---------|
+| Naabu | `projectdiscovery/naabu:latest` | Fast port scanning |
+| httpx | `projectdiscovery/httpx:latest` | HTTP probing & tech detection |
+| Nuclei | `projectdiscovery/nuclei:latest` | Vulnerability scanning |
+| Katana | `projectdiscovery/katana:latest` | Web crawling for DAST |
+| GAU | `sxcurity/gau:latest` | Passive URL discovery |
 
 ---
 
@@ -699,20 +934,35 @@ GITHUB_TARGET_ORG = "company"   # Organization/username to scan
 
 ## 🔧 Prerequisites
 
-### Required
-- **Python 3.8+**
-- **Docker** (for Naabu, httpx, Nuclei, and optionally GVM)
+### Docker Mode (Recommended)
+- **Docker** with Docker Compose
+- **Docker socket access** (for nested container execution)
 
-### Optional
 ```bash
-# For anonymous scanning
+# Verify Docker is running
+docker info
+
+# Build and run (all dependencies included in container)
+cd recon/
+docker-compose up --build
+```
+
+### Local Mode (Alternative)
+- **Python 3.8+**
+- **Docker** (still required for ProjectDiscovery tools)
+
+```bash
+# Install Python dependencies
+pip install -r recon/requirements.txt
+
+# For anonymous scanning (optional)
 sudo apt install tor proxychains4
 sudo systemctl start tor
 ```
 
 ### Docker Images (auto-pulled on first run)
 ```bash
-# ProjectDiscovery tools
+# ProjectDiscovery tools (auto-pulled by recon container)
 docker pull projectdiscovery/naabu:latest
 docker pull projectdiscovery/httpx:latest
 docker pull projectdiscovery/nuclei:latest
@@ -723,44 +973,65 @@ docker pull sxcurity/gau:latest             # For passive URL discovery
 # Binary is downloaded from GitHub releases to ~/.redamon/tools/kiterunner/
 ```
 
+### Tor Anonymity Support
+
+The Docker container includes Tor and proxychains. Enable with:
+
+```bash
+USE_TOR_FOR_RECON=true docker-compose up --build
+
+# Or use the Tor profile for a separate Tor container:
+docker-compose --profile tor up --build
+```
+
 ---
 
 ## 📁 Project Structure
 
 ```
 RedAmon/
-├── params.py              # 🎛️  Global configuration (edit this!)
-├── requirements.txt       # Python dependencies
-├── .env                   # Secrets (GITHUB_TOKEN, GVM_PASSWORD)
+├── .env                   # Secrets (GITHUB_TOKEN, GVM_PASSWORD, API keys)
 │
-├── recon/                 # Reconnaissance & scanning modules
+├── recon/                 # 🐳 Reconnaissance Module (Containerized)
+│   ├── Dockerfile         # Container build instructions
+│   ├── docker-compose.yml # Container orchestration
+│   ├── entrypoint.sh      # Container startup script
+│   ├── requirements.txt   # Python dependencies
+│   ├── params.py          # 🎛️ Recon configuration (edit this!)
 │   ├── main.py            # 🚀 Entry point - run this!
 │   ├── domain_recon.py    # Subdomain discovery
 │   ├── whois_recon.py     # WHOIS lookup
 │   ├── port_scan.py       # Port scanning
 │   ├── http_probe.py      # HTTP probing
+│   ├── resource_enum.py   # Endpoint discovery (Katana + GAU + Kiterunner)
 │   ├── vuln_scan.py       # Vulnerability scanning
-│   ├── add_mitre.py       # MITRE CWE/CAPEC enrichment (called by vuln_scan)
+│   ├── add_mitre.py       # MITRE CWE/CAPEC enrichment
 │   ├── github_secret_hunt.py  # GitHub secret hunting
-│   ├── output/            # 📄 Scan results (JSON)
-│   └── data/
-│       └── mitre_db/      # 📦 Cached CVE2CAPEC database
-│           ├── resources/ # CWE, CAPEC mappings
-│           └── database/  # CVE-year.jsonl files
+│   ├── output/            # 📄 Scan results (JSON) - shared volume
+│   ├── data/              # 📦 Cached databases
+│   │   ├── mitre_db/      # CVE2CAPEC database
+│   │   └── wappalyzer/    # Wappalyzer technologies
+│   ├── helpers/           # Tool-specific helpers
+│   └── readmes/           # 📖 Module documentation
 │
-├── readmes/               # 📖 Detailed documentation
-│   ├── README.PORT_SCAN.md    # Port scan configuration guide
-│   ├── README.HTTP_PROBE.md   # HTTP probe configuration guide
-│   ├── README.VULN_SCAN.md    # Vulnerability scan configuration guide
-│   ├── README.MITRE.md        # MITRE CWE/CAPEC enrichment guide
-│   └── README.GVM.md          # GVM/OpenVAS setup guide
-│
-├── gvm_scan/              # GVM/OpenVAS integration
+├── gvm_scan/              # 🐳 GVM/OpenVAS Module (Containerized)
 │   ├── docker-compose.yml # GVM container orchestration
 │   ├── Dockerfile         # Python scanner image
+│   ├── params.py          # 🎛️ GVM configuration
 │   ├── main.py            # GVM scan entry point
 │   └── output/            # GVM results
+│
+├── graph_db/              # Neo4j graph database integration
+├── utils/                 # Shared utilities (anonymity.py, etc.)
+└── mcp/                   # MCP server integration
 ```
+
+### Docker Volumes
+
+| Volume | Purpose | Access |
+|--------|---------|--------|
+| `redamon-recon-output` | Scan results (JSON) | Shared between containers |
+| `/var/run/docker.sock` | Docker socket | Required for nested containers |
 
 ---
 

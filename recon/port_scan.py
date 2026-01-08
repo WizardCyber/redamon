@@ -25,7 +25,7 @@ import sys
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from params import (
+from recon.params import (
     NAABU_DOCKER_IMAGE,
     NAABU_TOP_PORTS,
     NAABU_CUSTOM_PORTS,
@@ -171,6 +171,28 @@ def extract_targets_from_recon(recon_data: dict) -> Tuple[Set[str], Set[str], Di
 # Naabu Command Builder
 # =============================================================================
 
+def get_host_path(container_path: str) -> str:
+    """
+    Convert container path to host path for Docker-in-Docker volume mounts.
+
+    When running inside a container with mounted volumes, sibling containers
+    need host paths, not container paths. This function translates paths
+    using the HOST_RECON_OUTPUT_PATH environment variable.
+
+    The recon container mounts: ./output:/app/recon/output
+    So /app/recon/output/* inside the container maps to <host>/recon/output/* on host.
+    """
+    host_output_path = os.environ.get("HOST_RECON_OUTPUT_PATH", "")
+    container_output_path = "/app/recon/output"
+
+    if host_output_path and container_path.startswith(container_output_path):
+        # Replace container path with host path
+        return container_path.replace(container_output_path, host_output_path, 1)
+
+    # If not in container or path doesn't match, return as-is
+    return container_path
+
+
 def build_naabu_command(targets_file: str, output_file: str, use_proxy: bool = False) -> List[str]:
     """
     Build the Docker command for running Naabu.
@@ -183,9 +205,11 @@ def build_naabu_command(targets_file: str, output_file: str, use_proxy: bool = F
     Returns:
         List of command arguments
     """
-    targets_dir = str(Path(targets_file).parent)
+    # Convert container paths to host paths for sibling container volume mounts
+    targets_host_path = get_host_path(str(Path(targets_file).parent))
+    output_host_path = get_host_path(str(Path(output_file).parent))
+
     targets_filename = Path(targets_file).name
-    output_dir = str(Path(output_file).parent)
     output_filename = Path(output_file).name
 
     # Build Docker command
@@ -193,8 +217,8 @@ def build_naabu_command(targets_file: str, output_file: str, use_proxy: bool = F
     cmd = [
         "docker", "run", "--rm",
         "--net=host",  # Required for SYN scans
-        "-v", f"{targets_dir}:/targets:ro",
-        "-v", f"{output_dir}:/output",
+        "-v", f"{targets_host_path}:/targets:ro",
+        "-v", f"{output_host_path}:/output",
     ]
 
     # Add image

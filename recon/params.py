@@ -1,6 +1,5 @@
 """
-RedAmon - Global Parameters
-Configure target URL and other settings here.
+Recon - Parameters
 """
 import os
 from pathlib import Path
@@ -295,7 +294,7 @@ WAPPALYZER_BASE_URL = f"https://unpkg.com/wappalyzer@{WAPPALYZER_NPM_VERSION}"
 WAPPALYZER_CATEGORIES_URL = f"{WAPPALYZER_BASE_URL}/categories.json"
 
 # Local cache directory and file for downloaded database
-WAPPALYZER_CACHE_DIR = os.path.join(os.path.dirname(__file__), "recon", "data")
+WAPPALYZER_CACHE_DIR = os.path.join(os.path.dirname(__file__), "data")
 WAPPALYZER_CACHE_FILE = os.path.join(WAPPALYZER_CACHE_DIR, "wappalyzer_technologies.json")
 
 # Cache TTL in hours (0 = always download fresh, 24 = update daily)
@@ -864,7 +863,7 @@ MITRE_ENRICH_GVM = True
 
 # Local database cache settings
 # Path where CVE2CAPEC database will be cached
-MITRE_DATABASE_PATH = os.path.join(os.path.dirname(__file__), "recon", "data", "mitre_db")
+MITRE_DATABASE_PATH = os.path.join(os.path.dirname(__file__), "data", "mitre_db")
 
 # How long to cache the database before checking for updates (hours)
 # CVE2CAPEC updates daily at 00:05 UTC
@@ -1003,43 +1002,4 @@ SECURITY_CHECK_TIMEOUT = 10
 # Maximum concurrent workers for security checks
 SECURITY_CHECK_MAX_WORKERS = 10
 
-
-# =============================================================================
-# GVM/OpenVAS Vulnerability Scanner Configuration
-# =============================================================================
-
-USE_RECON_FOR_TARGET=True
-GVM_IP_LIST=[]
-GVM_HOSTNAME_LIST=[]
-
-# GVM connection settings (for Docker deployment)
-GVM_SOCKET_PATH = "/run/gvmd/gvmd.sock"  # Unix socket path inside container
-GVM_USERNAME = "admin"
-GVM_PASSWORD = os.getenv("GVM_PASSWORD", "admin")  # Set in .env for security
-
-# Scan configuration preset:
-# - "Full and fast" - Comprehensive scan, good performance (recommended)
-# - "Full and fast ultimate" - Most thorough, slower
-# - "Full and very deep" - Deep scan, very slow
-# - "Full and very deep ultimate" - Maximum coverage, very slow
-# - "Discovery" - Network discovery only, no vulnerability tests
-# - "Host Discovery" - Basic host enumeration
-# - "System Discovery" - System enumeration
-GVM_SCAN_CONFIG = "Full and fast"
-
-# Scan targets strategy:
-# - "both" - Scan IPs and hostnames separately for thorough coverage
-# - "ips_only" - Only scan IP addresses
-# - "hostnames_only" - Only scan hostnames/subdomains
-GVM_SCAN_TARGETS = "both"
-
-# Maximum time to wait for a single scan task (seconds, 0 = unlimited)
-# Note: "Full and fast" scans can take 1-2+ hours per target
-GVM_TASK_TIMEOUT = 14400  # 4 hours (increase if needed for many targets)
-
-# Poll interval for checking scan status (seconds)
-GVM_POLL_INTERVAL = 30
-
-# Cleanup targets and tasks after scan completion
-GVM_CLEANUP_AFTER_SCAN = True
 

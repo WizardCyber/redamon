@@ -14,8 +14,13 @@ Usage:
 
 import os
 import re
+from pathlib import Path
 from datetime import datetime
 from neo4j import GraphDatabase
+from dotenv import load_dotenv
+
+# Load environment variables from local .env file
+load_dotenv(Path(__file__).parent / ".env")
 
 
 def _is_ip_address(host: str) -> bool:

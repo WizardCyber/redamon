@@ -34,7 +34,7 @@ import sys
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from params import (
+from recon.params import (
     HTTPX_DOCKER_IMAGE,
     HTTPX_THREADS,
     HTTPX_TIMEOUT,
@@ -529,6 +529,21 @@ def build_targets_from_dns(recon_data: dict) -> List[str]:
 # httpx Command Builder
 # =============================================================================
 
+def get_host_path(container_path: str) -> str:
+    """
+    Convert container path to host path for Docker-in-Docker volume mounts.
+
+    When running inside a container with mounted volumes, sibling containers
+    need host paths, not container paths.
+    """
+    host_output_path = os.environ.get("HOST_RECON_OUTPUT_PATH", "")
+    container_output_path = "/app/recon/output"
+
+    if host_output_path and container_path.startswith(container_output_path):
+        return container_path.replace(container_output_path, host_output_path, 1)
+    return container_path
+
+
 def build_httpx_command(targets_file: str, output_file: str, use_proxy: bool = False) -> List[str]:
     """
     Build the Docker command for running httpx.
@@ -541,17 +556,19 @@ def build_httpx_command(targets_file: str, output_file: str, use_proxy: bool = F
     Returns:
         List of command arguments
     """
-    targets_dir = str(Path(targets_file).parent)
+    # Convert container paths to host paths for sibling container volume mounts
+    targets_host_path = get_host_path(str(Path(targets_file).parent))
+    output_host_path = get_host_path(str(Path(output_file).parent))
+
     targets_filename = Path(targets_file).name
-    output_dir = str(Path(output_file).parent)
     output_filename = Path(output_file).name
 
     # Build Docker command
     cmd = [
         "docker", "run", "--rm",
         # Note: Don't use -i (interactive) when reading from file, causes deadlock
-        "-v", f"{targets_dir}:/targets:ro",
-        "-v", f"{output_dir}:/output",
+        "-v", f"{targets_host_path}:/targets:ro",
+        "-v", f"{output_host_path}:/output",
     ]
 
     # Add image

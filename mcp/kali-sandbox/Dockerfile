@@ -6,8 +6,16 @@ LABEL description="Kali Linux sandbox with MCP servers for agentic penetration t
 # Avoid prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Update CA certificates and configure HTTPS mirror
+# The base image should have ca-certificates, we just need to update them
+RUN apt-get update -o Acquire::https::Verify-Peer=false \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && update-ca-certificates \
+    && echo "deb https://kali.download/kali kali-rolling main contrib non-free non-free-firmware" > /etc/apt/sources.list \
+    && apt-get update
+
 # Update and install penetration testing tools
-RUN apt-get update && apt-get install -y \
+RUN apt-get install -y --fix-missing \
     # Core tools
     curl \
     wget \
@@ -24,6 +32,8 @@ RUN apt-get update && apt-get install -y \
     net-tools \
     iputils-ping \
     dnsutils \
+    # Build dependencies for naabu (requires libpcap)
+    libpcap-dev \
     # Clean up
     && rm -rf /var/lib/apt/lists/*
 

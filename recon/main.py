@@ -23,11 +23,12 @@ import json
 from pathlib import Path
 from datetime import datetime
 
-# Add project root to path for imports
+# Add project root to path for imports (needed for graph_db, utils modules)
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from params import (
+# Import from local recon params (recon/params.py)
+from recon.params import (
     TARGET_DOMAIN,
     SUBDOMAIN_LIST,
     USE_TOR_FOR_RECON,
@@ -603,7 +604,7 @@ def main():
     # Check anonymity status if Tor is enabled
     if USE_TOR_FOR_RECON:
         try:
-            from utils.anonymity import print_anonymity_status
+            from recon.helpers.anonymity import print_anonymity_status
             print_anonymity_status()
         except ImportError:
             print("[!] Anonymity module not found, proceeding without Tor status check")

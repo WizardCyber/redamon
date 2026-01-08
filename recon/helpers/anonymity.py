@@ -43,7 +43,7 @@ FALLBACK_CHECK_URL = "https://api.ipify.org?format=json"
 def is_tor_running() -> bool:
     """
     Check if Tor service is running by testing the SOCKS port.
-    
+
     Returns:
         True if Tor SOCKS port is accepting connections.
     """
@@ -73,7 +73,7 @@ def get_proxychains_cmd() -> str:
 def check_tor_connection() -> dict:
     """
     Verify Tor connectivity and get exit node IP.
-    
+
     Returns:
         Dictionary with connection status and IP info.
     """
@@ -83,19 +83,19 @@ def check_tor_connection() -> dict:
         "exit_ip": None,
         "real_ip": None
     }
-    
+
     if not result["tor_running"]:
         return result
-    
+
     if requests is None:
         return result
-    
+
     try:
         # Get real IP first
         real_resp = requests.get(FALLBACK_CHECK_URL, timeout=10)
         if real_resp.status_code == 200:
             result["real_ip"] = real_resp.json().get("ip")
-        
+
         # Check Tor connection
         session = get_tor_session(log_exit_ip=False)
         if session:
@@ -107,7 +107,7 @@ def check_tor_connection() -> dict:
             session.close()
     except Exception:
         pass
-    
+
     return result
 
 
@@ -119,10 +119,10 @@ def get_tor_exit_ip(session: 'requests.Session') -> Optional[str]:
     """
     Get the current Tor exit node IP address.
     This is the IP that target servers will see.
-    
+
     Args:
         session: A Tor-configured requests session.
-        
+
     Returns:
         Exit IP address or None if check fails.
     """
@@ -132,95 +132,95 @@ def get_tor_exit_ip(session: 'requests.Session') -> Optional[str]:
             data = resp.json()
             if data.get("IsTor", False):
                 return data.get("IP")
-        
+
         resp = session.get(FALLBACK_CHECK_URL, timeout=10)
         if resp.status_code == 200:
             return resp.json().get("ip")
     except Exception:
         pass
-    
+
     return None
 
 
 def get_tor_session(log_exit_ip: bool = True) -> Optional['requests.Session']:
     """
     Create a requests Session configured to use Tor SOCKS proxy.
-    
+
     Args:
         log_exit_ip: Whether to log the exit IP to terminal.
-    
+
     Returns:
         Configured requests Session or None if Tor not available.
     """
     if requests is None:
         print("[!] requests library not available")
         return None
-    
+
     if not is_tor_running():
         print("[!] Tor is not running on port 9050")
         print("    Start with: sudo systemctl start tor")
         return None
-    
+
     session = requests.Session()
-    
+
     # Configure SOCKS5 proxy
     proxy_url = f"socks5h://{TOR_SOCKS_HOST}:{TOR_SOCKS_PORT}"
     session.proxies = {
         'http': proxy_url,
         'https': proxy_url
     }
-    
+
     # Add retry logic
     retry = Retry(total=3, backoff_factor=0.5)
     adapter = HTTPAdapter(max_retries=retry)
     session.mount('http://', adapter)
     session.mount('https://', adapter)
-    
+
     if log_exit_ip:
         exit_ip = get_tor_exit_ip(session)
         if exit_ip:
             print(f"\n{'=' * 50}")
-            print(f"🧅 TOR SESSION ACTIVE")
+            print(f"TOR SESSION ACTIVE")
             print(f"{'=' * 50}")
             print(f"   Exit IP (what targets see): {exit_ip}")
             print(f"   Your real IP: HIDDEN")
             print(f"{'=' * 50}\n")
         else:
             print("[!] Tor session created but could not verify exit IP")
-    
+
     return session
 
 
 class TorProxy:
     """
     Context manager for Tor-proxied requests.
-    
+
     Usage:
         with TorProxy() as session:
             response = session.get("https://example.com")
     """
-    
+
     def __init__(self, verify_connection: bool = True, log_exit_ip: bool = True):
         self.verify = verify_connection
         self.log_exit_ip = log_exit_ip
         self.session = None
         self.exit_ip = None
-    
+
     def __enter__(self) -> Optional['requests.Session']:
         self.session = get_tor_session(log_exit_ip=self.log_exit_ip)
-        
+
         if self.session and self.verify:
             self.exit_ip = get_tor_exit_ip(self.session)
             if not self.exit_ip:
                 print("[!] Warning: Could not verify Tor connection")
-        
+
         return self.session
-    
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self.session:
             self.session.close()
         return False
-    
+
     def get_exit_ip(self) -> Optional[str]:
         return self.exit_ip
 
@@ -232,30 +232,30 @@ class TorProxy:
 def run_through_tor(command: list, timeout: int = 300) -> subprocess.CompletedProcess:
     """
     Run a command through proxychains/Tor.
-    
+
     Args:
         command: Command and arguments as list.
         timeout: Timeout in seconds.
-        
+
     Returns:
         CompletedProcess result.
     """
     proxychains = get_proxychains_cmd()
-    
+
     if not proxychains:
         raise RuntimeError(
             "proxychains not found. Install with: sudo apt install proxychains4"
         )
-    
+
     if not is_tor_running():
         raise RuntimeError(
             "Tor is not running. Start with: sudo systemctl start tor"
         )
-    
+
     full_command = [proxychains, "-q"] + command
-    
+
     print(f"[*] Running through Tor: {' '.join(command)}")
-    
+
     return subprocess.run(
         full_command,
         capture_output=True,
@@ -300,28 +300,28 @@ def get_real_ip() -> Optional[str]:
 def print_anonymity_status():
     """Print current anonymity configuration status."""
     print("\n" + "=" * 50)
-    print("🔒 ANONYMITY STATUS")
+    print("ANONYMITY STATUS")
     print("=" * 50)
-    
+
     # Check Tor
-    tor_status = "✓ Running" if is_tor_running() else "✗ Not running"
+    tor_status = "Running" if is_tor_running() else "Not running"
     print(f"Tor Service:      {tor_status}")
-    
+
     # Check proxychains
-    pc_status = "✓ Available" if is_proxychains_available() else "✗ Not installed"
+    pc_status = "Available" if is_proxychains_available() else "Not installed"
     print(f"Proxychains:      {pc_status}")
-    
+
     # Get and display IPs
     print("\n" + "-" * 50)
-    print("📡 IP ADDRESSES")
+    print("IP ADDRESSES")
     print("-" * 50)
-    
+
     real_ip = get_real_ip()
     if real_ip:
         print(f"Your Real IP:     {real_ip}")
     else:
         print("Your Real IP:     Could not determine")
-    
+
     # Check Tor exit IP
     if is_tor_running():
         session = get_tor_session(log_exit_ip=False)
@@ -329,16 +329,16 @@ def print_anonymity_status():
             exit_ip = get_tor_exit_ip(session)
             session.close()
             if exit_ip:
-                print(f"Tor Exit IP:      {exit_ip} ← Targets see this!")
-                print("\n✅ Tor is working! Your real IP is hidden.")
+                print(f"Tor Exit IP:      {exit_ip} <- Targets see this!")
+                print("\nTor is working! Your real IP is hidden.")
             else:
                 print("Tor Exit IP:      Could not verify")
-                print("\n⚠️  Tor running but could not verify connection")
+                print("\nWARNING: Tor running but could not verify connection")
     else:
         print("Tor Exit IP:      N/A (Tor not running)")
-        print("\n⚠️  WARNING: Your real IP is EXPOSED!")
+        print("\nWARNING: Your real IP is EXPOSED!")
         print("    Start Tor with: sudo systemctl start tor")
-    
+
     print("=" * 50 + "\n")
 
 
@@ -361,17 +361,17 @@ def require_tor(func):
 
 if __name__ == "__main__":
     print_anonymity_status()
-    
+
     if is_tor_running():
-        print("\n🧅 Testing Tor connection...")
+        print("\nTesting Tor connection...")
         with TorProxy(log_exit_ip=False) as session:
             if session:
                 try:
                     resp = session.get("https://httpbin.org/ip", timeout=15)
-                    print(f"✓ httpbin.org sees IP: {resp.json().get('origin')}")
+                    print(f"httpbin.org sees IP: {resp.json().get('origin')}")
                 except Exception as e:
-                    print(f"✗ Test failed: {e}")
+                    print(f"Test failed: {e}")
     else:
-        print("\n💡 To enable Tor anonymity:")
+        print("\nTo enable Tor anonymity:")
         print("   sudo apt install tor proxychains4")
         print("   sudo systemctl start tor")

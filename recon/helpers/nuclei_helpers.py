@@ -4,12 +4,28 @@ RedAmon - Nuclei Helper Functions
 Functions for building Nuclei commands, parsing output, and detecting false positives.
 """
 
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import List
 
 # Import volume constant from docker helpers
 from .docker_helpers import NUCLEI_TEMPLATES_VOLUME
+
+
+def get_host_path(container_path: str) -> str:
+    """
+    Convert container path to host path for Docker-in-Docker volume mounts.
+
+    When running inside a container with mounted volumes, sibling containers
+    need host paths, not container paths.
+    """
+    host_output_path = os.environ.get("HOST_RECON_OUTPUT_PATH", "")
+    container_output_path = "/app/recon/output"
+
+    if host_output_path and container_path.startswith(container_output_path):
+        return container_path.replace(container_output_path, host_output_path, 1)
+    return container_path
 
 
 # =============================================================================
@@ -55,15 +71,16 @@ def build_nuclei_command(
         Command as list of arguments
     """
     # Docker command with volume mounts
-    targets_dir = str(Path(targets_file).parent)
-    output_dir = str(Path(output_file).parent)
+    # Convert container paths to host paths for sibling container volume mounts
+    targets_host_path = get_host_path(str(Path(targets_file).parent))
+    output_host_path = get_host_path(str(Path(output_file).parent))
     targets_filename = Path(targets_file).name
     output_filename = Path(output_file).name
-    
+
     cmd = [
         "docker", "run", "--rm",
-        "-v", f"{targets_dir}:/targets:ro",
-        "-v", f"{output_dir}:/output",
+        "-v", f"{targets_host_path}:/targets:ro",
+        "-v", f"{output_host_path}:/output",
         "-v", f"{NUCLEI_TEMPLATES_VOLUME}:/root/nuclei-templates",
     ]
     

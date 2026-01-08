@@ -123,6 +123,10 @@ AI Agent (Claude/LangGraph)
 cd mcp
 docker-compose up -d --build
 ```
+#### only start after build
+```bash
+docker-compose up -d
+```
 
 ### 2. Verify Services
 
@@ -135,6 +139,9 @@ docker-compose logs -f kali-sandbox
 
 # Test a server
 curl http://localhost:8000/health
+
+# Test commmands run for each server:
+python mcp/test_mcp.py https://testphp.vulnweb.com
 ```
 
 ### 3. Connect AI Agent

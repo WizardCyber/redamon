@@ -6,7 +6,11 @@ services:
     build:
       context: .
       dockerfile: kali-sandbox/Dockerfile
+      network: host
     container_name: redamon-kali
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     hostname: kali-sandbox
     networks:
       - pentest-net
@@ -23,6 +27,7 @@ services:
       - "8001:8001"  # curl MCP server
       - "8002:8002"  # nuclei MCP server
       - "8003:8003"  # metasploit MCP server
+      - "4444:4444"  # Metasploit reverse shell listener
     volumes:
       # Mount servers directory for development (hot reload)
       - ./servers:/opt/mcp_servers

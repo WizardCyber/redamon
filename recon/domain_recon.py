@@ -20,7 +20,7 @@ import sys
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from params import DNS_MAX_RETRIES
+from recon.params import DNS_MAX_RETRIES
 
 OUTPUT_DIR = Path(__file__).parent / "output"
 DNS_RECORD_TYPES = ['A', 'AAAA', 'MX', 'NS', 'TXT', 'SOA', 'CNAME']
@@ -30,7 +30,7 @@ def get_tor_session(anonymous: bool):
     """Get requests session, optionally through Tor."""
     if anonymous:
         try:
-            from utils.anonymity import get_tor_session, is_tor_running
+            from recon.helpers.anonymity import get_tor_session, is_tor_running
             if is_tor_running():
                 session = get_tor_session()
                 if session:
@@ -45,7 +45,7 @@ def get_proxychains_prefix(anonymous: bool) -> list:
     """Get proxychains command prefix if enabled."""
     if anonymous:
         try:
-            from utils.anonymity import get_proxychains_cmd, is_tor_running
+            from recon.helpers.anonymity import get_proxychains_cmd, is_tor_running
             if is_tor_running():
                 cmd = get_proxychains_cmd()
                 if cmd:

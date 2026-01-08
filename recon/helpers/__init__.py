@@ -63,6 +63,22 @@ from .security_checks import (
     run_security_checks,
 )
 
+# Anonymity/Tor utilities
+from .anonymity import (
+    is_tor_running as is_tor_running_anonymity,
+    is_proxychains_available,
+    get_proxychains_cmd,
+    get_tor_session,
+    get_tor_exit_ip,
+    check_tor_connection,
+    print_anonymity_status,
+    run_through_tor,
+    run_command_anonymous,
+    get_real_ip,
+    require_tor,
+    TorProxy,
+)
+
 __all__ = [
     # Docker
     "is_docker_installed",
@@ -97,5 +113,18 @@ __all__ = [
     "VULNERS_API_URL",
     # Security checks
     "run_security_checks",
+    # Anonymity/Tor
+    "is_tor_running_anonymity",
+    "is_proxychains_available",
+    "get_proxychains_cmd",
+    "get_tor_session",
+    "get_tor_exit_ip",
+    "check_tor_connection",
+    "print_anonymity_status",
+    "run_through_tor",
+    "run_command_anonymous",
+    "get_real_ip",
+    "require_tor",
+    "TorProxy",
 ]
 
