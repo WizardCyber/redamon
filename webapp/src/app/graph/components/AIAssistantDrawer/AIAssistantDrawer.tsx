@@ -99,23 +99,44 @@ export function AIAssistantDrawer({
   const [todoList, setTodoList] = useState<TodoItem[]>([])
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const messagesContainerRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const isProcessingApproval = useRef(false)
   const awaitingApprovalRef = useRef(false)
+  const shouldAutoScroll = useRef(true)
 
-  const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  const scrollToBottom = useCallback((force = false) => {
+    if (force || shouldAutoScroll.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }
   }, [])
 
+  // Check if user is at the bottom of the scroll
+  const checkIfAtBottom = useCallback(() => {
+    const container = messagesContainerRef.current
+    if (!container) return true
+
+    const threshold = 50 // pixels from bottom
+    const isAtBottom =
+      container.scrollHeight - container.scrollTop - container.clientHeight < threshold
+
+    shouldAutoScroll.current = isAtBottom
+    return isAtBottom
+  }, [])
+
+  // Auto-scroll only if user is at bottom
   useEffect(() => {
     scrollToBottom()
   }, [chatItems, scrollToBottom])
 
   useEffect(() => {
     if (isOpen && inputRef.current && !awaitingApproval) {
-      setTimeout(() => inputRef.current?.focus(), 300)
+      setTimeout(() => {
+        inputRef.current?.focus()
+        scrollToBottom(true) // Force scroll to bottom when opening
+      }, 300)
     }
-  }, [isOpen, awaitingApproval])
+  }, [isOpen, awaitingApproval, scrollToBottom])
 
   // Reset state when session changes
   useEffect(() => {
@@ -131,6 +152,7 @@ export function AIAssistantDrawer({
     setTodoList([])
     awaitingApprovalRef.current = false
     isProcessingApproval.current = false
+    shouldAutoScroll.current = true // Reset to auto-scroll on new session
   }, [sessionId])
 
   // WebSocket message handler
@@ -428,19 +450,25 @@ export function AIAssistantDrawer({
     setTodoList([])
     awaitingApprovalRef.current = false
     isProcessingApproval.current = false
+    shouldAutoScroll.current = true // Reset to auto-scroll on new chat
     onResetSession?.()
   }
 
   const PhaseIcon = PHASE_CONFIG[currentPhase].icon
 
-  // Connection status indicator
+  // Connection status indicator with color
+  const getConnectionStatusColor = () => {
+    return status === ConnectionStatus.CONNECTED ? '#10b981' : '#ef4444' // green : red
+  }
+
   const getConnectionStatusIcon = () => {
+    const color = getConnectionStatusColor()
     if (status === ConnectionStatus.CONNECTED) {
-      return <Wifi size={12} className={styles.connectionIcon} />
+      return <Wifi size={12} className={styles.connectionIcon} style={{ color }} />
     } else if (status === ConnectionStatus.RECONNECTING) {
-      return <Loader2 size={12} className={`${styles.connectionIcon} ${styles.spinner}`} />
+      return <Loader2 size={12} className={`${styles.connectionIcon} ${styles.spinner}`} style={{ color }} />
     } else {
-      return <WifiOff size={12} className={styles.connectionIcon} />
+      return <WifiOff size={12} className={styles.connectionIcon} style={{ color }} />
     }
   }
 
@@ -551,7 +579,9 @@ export function AIAssistantDrawer({
             <h2 className={styles.title}>AI Assistant</h2>
             <div className={styles.connectionStatus}>
               {getConnectionStatusIcon()}
-              <span className={styles.subtitle}>{getConnectionStatusText()}</span>
+              <span className={styles.subtitle} style={{ color: getConnectionStatusColor() }}>
+                {getConnectionStatusText()}
+              </span>
             </div>
           </div>
         </div>
@@ -601,7 +631,7 @@ export function AIAssistantDrawer({
       )}
 
       {/* Unified Chat (Messages + Timeline Items) */}
-      <div className={styles.messages}>
+      <div className={styles.messages} ref={messagesContainerRef} onScroll={checkIfAtBottom}>
         {chatItems.length === 0 && (
           <div className={styles.emptyState}>
             <div className={styles.emptyIcon}>
