@@ -44,6 +44,7 @@ from params import (
     REQUIRE_APPROVAL_FOR_EXPLOITATION,
     REQUIRE_APPROVAL_FOR_POST_EXPLOITATION,
     TOOL_OUTPUT_MAX_CHARS,
+    POST_EXPL_SESSION,
 )
 from tools import (
     MCPToolsManager,
@@ -322,7 +323,7 @@ class AgentOrchestrator:
 
         system_prompt = REACT_SYSTEM_PROMPT.format(
             current_phase=phase,
-            available_tools=get_phase_tools(phase),
+            available_tools=get_phase_tools(phase, POST_EXPL_SESSION),
             iteration=iteration,
             max_iterations=state.get("max_iterations", MAX_ITERATIONS),
             objective=state.get("original_objective", "No objective specified"),

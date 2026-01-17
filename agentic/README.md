@@ -1,5 +1,4 @@
-exploit CVE-2021-42013 attack 15.160.68.117 with port 8080 im sending the request with a server that cannot receive revers_bash because no port listening... for exploitation use bind_tcp LPORT 4444 RPORT 8080
-
+exploit CVE-2021-42013 attack 15.160.68.117 with port 8080 and deface the web root page writing "Site hacked!"
 
 # RedAmon Agent Orchestrator
 
