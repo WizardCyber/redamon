@@ -16,7 +16,8 @@ def utc_now() -> datetime:
     """Get current UTC time as timezone-aware datetime."""
     return datetime.now(timezone.utc)
 
-from pydantic import BaseModel, Field
+import re
+from pydantic import BaseModel, Field, field_validator
 from langgraph.graph.message import add_messages
 
 

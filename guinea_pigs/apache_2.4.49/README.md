@@ -20,7 +20,7 @@ Vulnerable Apache server for testing path traversal and RCE exploits.
 - **Type**: t2.micro
 - **Security Group**: SSH (22) + Custom TCP (8080) - your IP only
 
-### 2. Deploy (first time)
+### 2. Deploy (first time or any update)
 
 ```bash
 # Copy entire folder to EC2
@@ -28,16 +28,6 @@ scp -i ~/.ssh/guinea_pigs.pem -r apache_2.4.49 ubuntu@15.160.68.117:~
 
 # Run setup
 ssh -i ~/.ssh/guinea_pigs.pem ubuntu@15.160.68.117 "bash ~/apache_2.4.49/setup.sh"
-```
-
-### 3. Update & Redeploy (after code changes)
-
-```bash
-# Copy updated folder
-scp -i ~/.ssh/guinea_pigs.pem -r apache_2.4.49 ubuntu@15.160.68.117:~
-
-# Rebuild and restart
-ssh -i ~/.ssh/guinea_pigs.pem ubuntu@15.160.68.117 "cd ~/apache_2.4.49 && sudo docker-compose down && sudo docker-compose build --no-cache && sudo docker-compose up -d"
 ```
 
 

@@ -9,9 +9,25 @@ import os
 import re
 import json
 import logging
+from datetime import datetime
 from typing import Optional, List, Dict, Any
 
 from dotenv import load_dotenv
+
+
+class DateTimeEncoder(json.JSONEncoder):
+    """JSON encoder that handles datetime objects."""
+    def default(self, obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        return super().default(obj)
+
+
+def json_dumps_safe(obj, **kwargs):
+    """JSON dumps with datetime support."""
+    return json.dumps(obj, cls=DateTimeEncoder, **kwargs)
+
+
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, START, END
@@ -40,7 +56,13 @@ from state import (
     summarize_trace_for_response,
     utc_now,
 )
-from utils import create_config, get_config_values, get_identifiers, set_checkpointer, is_session_config_complete
+from utils import (
+    create_config,
+    get_config_values,
+    get_identifiers,
+    set_checkpointer,
+    is_session_config_complete,
+)
 from params import (
     OPENAI_MODEL,
     CREATE_GRAPH_IMAGRE_ON_INIT,
@@ -515,13 +537,16 @@ class AgentOrchestrator:
             current_objective_index=state.get("current_objective_index", 0)
         )
         todo_list_formatted = format_todo_list(state.get("todo_list", []))
-        target_info_formatted = json.dumps(state.get("target_info", {}), indent=2)
+        target_info_formatted = json_dumps_safe(state.get("target_info", {}), indent=2)
         qa_history_formatted = format_qa_history(state.get("qa_history", []))
         objective_history_formatted = format_objective_history(state.get("objective_history", []))
 
+        # Get phase tools
+        available_tools = get_phase_tools(phase, ACTIVATE_POST_EXPL_PHASE, POST_EXPL_PHASE_TYPE)
+
         system_prompt = REACT_SYSTEM_PROMPT.format(
             current_phase=phase,
-            available_tools=get_phase_tools(phase, ACTIVATE_POST_EXPL_PHASE, POST_EXPL_PHASE_TYPE),
+            available_tools=available_tools,
             iteration=iteration,
             max_iterations=state.get("max_iterations", MAX_ITERATIONS),
             objective=current_objective,  # Now uses current objective, not original
@@ -551,7 +576,7 @@ class AgentOrchestrator:
         # Get LLM decision
         messages = [
             SystemMessage(content=system_prompt),
-            HumanMessage(content="Based on the current state, what is your next action? Output valid JSON.")
+            HumanMessage(content="Based on the current state, what is your next action? Output EXACTLY ONE valid JSON object and nothing else. Do NOT simulate tool execution - you will receive actual tool output after submitting your decision. Do NOT output multiple JSON objects or continue the conversation - just ONE decision JSON.")
         ]
 
         response = await self.llm.ainvoke(messages)
@@ -578,7 +603,7 @@ class AgentOrchestrator:
         logger.info(f"ACTION: {decision.action}")
         if decision.tool_name:
             logger.info(f"TOOL: {decision.tool_name}")
-            logger.info(f"TOOL_ARGS: {json.dumps(decision.tool_args, indent=2) if decision.tool_args else 'None'}")
+            logger.info(f"TOOL_ARGS: {json_dumps_safe(decision.tool_args, indent=2) if decision.tool_args else 'None'}")
         if decision.phase_transition:
             logger.info(f"PHASE_TRANSITION: {decision.phase_transition.to_phase}")
 
@@ -926,9 +951,9 @@ class AgentOrchestrator:
         # Use LLM to analyze the output (truncate to avoid token limits)
         analysis_prompt = OUTPUT_ANALYSIS_PROMPT.format(
             tool_name=tool_name,
-            tool_args=json.dumps(step_data.get("tool_args") or {}),
+            tool_args=json_dumps_safe(step_data.get("tool_args") or {}),
             tool_output=tool_output[:TOOL_OUTPUT_MAX_CHARS] if tool_output else "No output",
-            current_target_info=json.dumps(state.get("target_info") or {}, indent=2),
+            current_target_info=json_dumps_safe(state.get("target_info") or {}, indent=2),
         )
 
         response = await self.llm.ainvoke([HumanMessage(content=analysis_prompt)])
@@ -1066,16 +1091,19 @@ class AgentOrchestrator:
         logger.info(f"[{user_id}/{project_id}/{session_id}] Processing approval: {approval}")
 
         # Common fields to clear approval state - CRITICAL for frontend to close dialog
+        # Also clear _emitted_approval_key so the same transition can be requested again later
         clear_approval_state = {
             "awaiting_user_approval": False,
             "phase_transition_pending": None,
             "user_approval_response": None,
             "user_modification": None,
+            "_emitted_approval_key": None,
         }
 
         if approval == "approve":
             # Transition to new phase
             new_phase = transition.get("to_phase", "exploitation")
+            from_phase = transition.get("from_phase", state.get("current_phase", "informational"))
             logger.info(f"[{user_id}/{project_id}/{session_id}] Transitioning to phase: {new_phase}")
 
             # Update objective's required_phase hint
@@ -1084,6 +1112,20 @@ class AgentOrchestrator:
             if current_idx < len(objectives):
                 objectives[current_idx]["required_phase"] = new_phase
 
+            # Add execution trace entry so LLM sees the transition happened
+            transition_step = ExecutionStep(
+                iteration=state.get("current_iteration", 0),
+                phase=new_phase,  # Use new_phase (must be valid Phase literal)
+                thought=f"Phase transition from {from_phase} to {new_phase} approved by user.",
+                reasoning=f"User approved the transition request. Moving from {from_phase} phase to {new_phase} phase to continue with the objective.",
+                tool_name="phase_transition",
+                tool_args={"from_phase": from_phase, "to_phase": new_phase},
+                tool_output=f"PHASE TRANSITION APPROVED: {from_phase} → {new_phase}. Now operating in {new_phase} phase.",
+                success=True,
+                output_analysis=f"Phase transition approved. Agent is now in {new_phase} phase and can use {new_phase}-specific tools. DO NOT request another transition to {new_phase} - you are already there.",
+            )
+            updated_trace = state.get("execution_trace", []) + [transition_step.model_dump()]
+
             return {
                 **clear_approval_state,
                 "current_phase": new_phase,
@@ -1091,6 +1133,7 @@ class AgentOrchestrator:
                     PhaseHistoryEntry(phase=new_phase).model_dump()
                 ],
                 "conversation_objectives": objectives,  # Updated
+                "execution_trace": updated_trace,  # Add transition to trace so LLM sees it
                 "messages": [AIMessage(content=f"Phase transition approved. Now in **{new_phase}** phase.")],
                 # Mark that we just transitioned to prevent re-requesting
                 "_just_transitioned_to": new_phase,
@@ -1166,10 +1209,12 @@ class AgentOrchestrator:
         qa_history = state.get("qa_history", []) + [qa_entry.model_dump()]
 
         # Clear Q&A state and add to messages
+        # Also clear _emitted_question_key so the same question can be asked again later if needed
         return {
             "awaiting_user_question": False,
             "pending_question": None,
             "user_question_answer": None,
+            "_emitted_question_key": None,
             "qa_history": qa_history,
             "messages": [
                 HumanMessage(content=f"User answer: {answer}"),
@@ -1195,7 +1240,7 @@ class AgentOrchestrator:
                 objective_history=state.get("objective_history", []),
                 current_objective_index=state.get("current_objective_index", 0)
             ),
-            target_info=json.dumps(state.get("target_info", {}), indent=2),
+            target_info=json_dumps_safe(state.get("target_info", {}), indent=2),
             todo_list=format_todo_list(state.get("todo_list", [])),
         )
 
@@ -1352,16 +1397,59 @@ class AgentOrchestrator:
         try:
             json_str = self._extract_json(response_text)
             if json_str:
-                return OutputAnalysis.model_validate_json(json_str)
+                data = json.loads(json_str)
+
+                # Pre-process sessions field to extract integers from strings
+                # LLM sometimes returns session descriptions like "Meterpreter session 1 opened..."
+                if "extracted_info" in data and "sessions" in data["extracted_info"]:
+                    sessions = data["extracted_info"]["sessions"]
+                    parsed_sessions = []
+                    for item in sessions:
+                        if isinstance(item, int):
+                            parsed_sessions.append(item)
+                        elif isinstance(item, str):
+                            # Extract session ID from strings like "Meterpreter session 1 opened..."
+                            match = re.search(r'[Ss]ession\s+(\d+)', item)
+                            if match:
+                                parsed_sessions.append(int(match.group(1)))
+                            else:
+                                try:
+                                    parsed_sessions.append(int(item))
+                                except ValueError:
+                                    pass
+                    data["extracted_info"]["sessions"] = parsed_sessions
+
+                return OutputAnalysis.model_validate(data)
         except Exception as e:
             logger.warning(f"Failed to parse analysis response: {e}")
 
-        # Fallback - return basic analysis with raw text
+        # Fallback - extract fields from JSON if possible, even when validation fails
+        fallback_interpretation = response_text
+        fallback_findings = []
+        fallback_next_steps = []
+
+        try:
+            json_str = self._extract_json(response_text)
+            if json_str:
+                data = json.loads(json_str)
+                if "interpretation" in data:
+                    fallback_interpretation = data["interpretation"]
+                if "actionable_findings" in data and isinstance(data["actionable_findings"], list):
+                    fallback_findings = data["actionable_findings"]
+                if "recommended_next_steps" in data and isinstance(data["recommended_next_steps"], list):
+                    fallback_next_steps = data["recommended_next_steps"]
+        except Exception:
+            # If JSON extraction also fails, strip markdown code blocks from raw text
+            # Remove ```json ... ``` wrapper
+            fallback_interpretation = re.sub(r'^```(?:json)?\s*', '', fallback_interpretation)
+            fallback_interpretation = re.sub(r'\s*```$', '', fallback_interpretation)
+            fallback_interpretation = fallback_interpretation.strip()
+
         return OutputAnalysis(
-            interpretation=response_text,
+            interpretation=fallback_interpretation,
             extracted_info=ExtractedTargetInfo(),
-            actionable_findings=[],
-            recommended_next_steps=[],
+            actionable_findings=fallback_findings,
+            recommended_next_steps=fallback_next_steps,
         )
 
     # =========================================================================
@@ -1694,13 +1782,23 @@ class AgentOrchestrator:
             if "todo_list" in state and state.get("todo_list"):
                 await callback.on_todo_update(state["todo_list"])
 
-            # Approval request
+            # Approval request - use state marker to prevent duplicate emissions
             if state.get("awaiting_user_approval") and state.get("phase_transition_pending"):
-                await callback.on_approval_request(state["phase_transition_pending"])
+                pending = state["phase_transition_pending"]
+                # Create unique key for this specific transition
+                approval_key = f"{pending.get('from_phase', '')}_{pending.get('to_phase', '')}"
+                if state.get("_emitted_approval_key") != approval_key:
+                    await callback.on_approval_request(pending)
+                    state["_emitted_approval_key"] = approval_key
 
-            # Question request
+            # Question request - use state marker to prevent duplicate emissions
             if state.get("awaiting_user_question") and state.get("pending_question"):
-                await callback.on_question_request(state["pending_question"])
+                pending = state["pending_question"]
+                # Create unique key for this specific question
+                question_key = f"{pending.get('phase', '')}_{hash(pending.get('question', '')[:100])}"
+                if state.get("_emitted_question_key") != question_key:
+                    await callback.on_question_request(pending)
+                    state["_emitted_question_key"] = question_key
 
             # Emit thinking FIRST (from _decision stored by _think_node)
             # This ensures thinking appears BEFORE the tool execution it leads to

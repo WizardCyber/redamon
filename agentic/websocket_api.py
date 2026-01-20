@@ -15,6 +15,17 @@ from enum import Enum
 from fastapi import WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, ValidationError
 
+
+def serialize_for_json(obj):
+    """Convert objects to JSON-serializable format, handling datetime objects."""
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    elif isinstance(obj, dict):
+        return {k: serialize_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [serialize_for_json(item) for item in obj]
+    return obj
+
 logger = logging.getLogger(__name__)
 
 
@@ -95,9 +106,11 @@ class WebSocketConnection:
     async def send_message(self, message_type: MessageType, payload: Any):
         """Send JSON message to client"""
         try:
+            # Serialize payload to handle datetime objects
+            serialized_payload = serialize_for_json(payload)
             message = {
                 "type": message_type.value,
-                "payload": payload,
+                "payload": serialized_payload,
                 "timestamp": datetime.utcnow().isoformat()
             }
             await self.websocket.send_json(message)
@@ -182,8 +195,7 @@ class StreamingCallback:
 
     def __init__(self, connection: WebSocketConnection):
         self.connection = connection
-        self._approval_request_sent = False
-        self._question_request_sent = False
+        # Response and task_complete are truly once-per-session events
         self._task_complete_sent = False
         self._response_sent = False
 
@@ -249,21 +261,15 @@ class StreamingCallback:
 
     async def on_approval_request(self, approval_request: dict):
         """Called when agent requests phase transition approval"""
-        if not self._approval_request_sent:
-            await self.connection.send_message(MessageType.APPROVAL_REQUEST, approval_request)
-            self._approval_request_sent = True
-            logger.info(f"Approval request sent to session {self.connection.session_id}")
-        else:
-            logger.debug(f"Duplicate approval request blocked for session {self.connection.session_id}")
+        # Deduplication is handled by orchestrator using _emitted_approval marker in state
+        await self.connection.send_message(MessageType.APPROVAL_REQUEST, approval_request)
+        logger.info(f"Approval request sent to session {self.connection.session_id}")
 
     async def on_question_request(self, question_request: dict):
         """Called when agent asks user a question"""
-        if not self._question_request_sent:
-            await self.connection.send_message(MessageType.QUESTION_REQUEST, question_request)
-            self._question_request_sent = True
-            logger.info(f"Question request sent to session {self.connection.session_id}")
-        else:
-            logger.debug(f"Duplicate question request blocked for session {self.connection.session_id}")
+        # Deduplication is handled by orchestrator using _emitted_question marker in state
+        await self.connection.send_message(MessageType.QUESTION_REQUEST, question_request)
+        logger.info(f"Question request sent to session {self.connection.session_id}")
 
     async def on_response(self, answer: str, iteration_count: int, phase: str, task_complete: bool):
         """Called when agent provides final response"""
