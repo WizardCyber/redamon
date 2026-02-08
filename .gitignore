@@ -126,3 +126,6 @@ docker-compose.override.yml
 
 # Private strategy docs
 LAUNCHPLAN.md
+
+# Claude Code config
+.claude/
