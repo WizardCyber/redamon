@@ -232,6 +232,12 @@ services:
       AGENT_WS_URL: ws://agent:8080/ws/agent
       # Recon container connects via host network, needs host-accessible webapp URL
       WEBAPP_URL: http://localhost:${WEBAPP_PORT:-3000}
+      # Output paths (must match volume mounts below)
+      RECON_OUTPUT_PATH: /data/recon-output
+      GVM_OUTPUT_PATH: /data/gvm-output
+    volumes:
+      - ./recon/output:/data/recon-output:ro
+      - ./gvm_scan/output:/data/gvm-output:ro
     depends_on:
       postgres:
         condition: service_healthy
