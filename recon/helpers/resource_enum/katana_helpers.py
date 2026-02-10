@@ -4,6 +4,7 @@ RedAmon - Katana Crawler Helpers for Resource Enumeration
 Active URL discovery using Katana web crawler.
 """
 
+import select
 import subprocess
 import ssl
 import time
@@ -55,10 +56,16 @@ def run_katana_crawler(
     Returns:
         Tuple of (discovered_urls, url_to_response_body)
     """
+    # Convert timeout (seconds) to Katana crawl-duration format
+    crawl_duration = f"{timeout}s"
+    # Idle timeout: kill if no output for 5 minutes (crawl is stuck/done)
+    idle_timeout = 300
+
     print(f"\n[*] Running Katana crawler for endpoint discovery...")
     print(f"    Crawl depth: {depth}")
     print(f"    Max URLs: {max_urls}")
     print(f"    Rate limit: {rate_limit} req/s")
+    print(f"    Crawl duration: {crawl_duration}")
     print(f"    Params only: {params_only}")
     print(f"    Allowed hosts: {len(allowed_hosts)} ({', '.join(sorted(allowed_hosts)[:5])}{'...' if len(allowed_hosts) > 5 else ''})")
 
@@ -84,7 +91,8 @@ def run_katana_crawler(
             "-silent",
             "-nc",
             "-rl", str(rate_limit),
-            "-timeout", str(timeout),
+            "-timeout", "30",
+            "-crawl-duration", crawl_duration,
             # Use FQDN scope: restricts crawl to exact hostname of seed URL
             # This prevents crawling parent domains (e.g. sub.example.com won't
             # crawl example.com). Post-hoc filtering provides additional safety.
@@ -116,14 +124,36 @@ def run_katana_crawler(
             try:
                 start_time = time.time()
                 deadline = start_time + timeout + 60
+                last_output_time = start_time
 
-                for line in process.stdout:
-                    # Check timeout
+                # Use select-based polling so timeouts trigger even when
+                # Katana outputs nothing (e.g. headless browser spinning)
+                while True:
+                    # Check overall deadline
                     if time.time() > deadline:
-                        print(f"    [!] Katana timeout for {base_url}")
+                        print(f"    [!] Katana overall timeout for {base_url}")
                         process.kill()
                         break
 
+                    # Check idle timeout (no output for too long)
+                    if time.time() - last_output_time > idle_timeout:
+                        print(f"    [!] Katana idle timeout ({idle_timeout}s with no output) for {base_url}")
+                        process.kill()
+                        break
+
+                    # Poll stdout with 10s timeout so we can re-check deadlines
+                    ready, _, _ = select.select([process.stdout], [], [], 10)
+                    if not ready:
+                        # No data, check if process exited
+                        if process.poll() is not None:
+                            break
+                        continue
+
+                    line = process.stdout.readline()
+                    if not line:  # EOF — process finished
+                        break
+
+                    last_output_time = time.time()
                     url = line.strip()
                     if not url:
                         continue

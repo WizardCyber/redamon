@@ -29,17 +29,20 @@ export function NodeDrawer({ node, isOpen, onClose, onDeleteNode }: NodeDrawerPr
     }
   }
 
-  // Sort properties with created_at and updated_at at the bottom
+  // Filter out internal IDs and sort with timestamps at the bottom
+  const hiddenKeys = ['project_id', 'user_id']
   const sortedProperties = node
-    ? Object.entries(node.properties || {}).sort(([a], [b]) => {
-        const bottomKeys = ['created_at', 'updated_at']
-        const aIsBottom = bottomKeys.includes(a)
-        const bIsBottom = bottomKeys.includes(b)
-        if (aIsBottom && !bIsBottom) return 1
-        if (!aIsBottom && bIsBottom) return -1
-        if (aIsBottom && bIsBottom) return bottomKeys.indexOf(a) - bottomKeys.indexOf(b)
-        return 0
-      })
+    ? Object.entries(node.properties || {})
+        .filter(([key]) => !hiddenKeys.includes(key))
+        .sort(([a], [b]) => {
+          const bottomKeys = ['created_at', 'updated_at']
+          const aIsBottom = bottomKeys.includes(a)
+          const bIsBottom = bottomKeys.includes(b)
+          if (aIsBottom && !bIsBottom) return 1
+          if (!aIsBottom && bIsBottom) return -1
+          if (aIsBottom && bIsBottom) return bottomKeys.indexOf(a) - bottomKeys.indexOf(b)
+          return 0
+        })
     : []
 
   return (
