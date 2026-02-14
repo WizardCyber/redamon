@@ -879,6 +879,13 @@ export function AIAssistantDrawer({
               >
                 Deface the target homepage
               </button>
+              <button
+                className={styles.suggestion}
+                onClick={() => setInputValue('Use any secrets or credentials found on GitHub to attempt access to the target server and report what you find')}
+                disabled={!isConnected}
+              >
+                Leverage GitHub secrets to access the server
+              </button>
             </div>
           </div>
         )}

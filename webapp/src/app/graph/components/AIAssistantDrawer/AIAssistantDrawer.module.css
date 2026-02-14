@@ -281,6 +281,8 @@
   flex-direction: column;
   gap: var(--space-2);
   max-width: 85%;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .messageText {
@@ -288,6 +290,8 @@
   border-radius: var(--radius-lg);
   font-size: var(--text-sm);
   line-height: var(--leading-relaxed);
+  overflow-x: auto;
+  min-width: 0;
 }
 
 /* Markdown content styling - minimal overrides for react-markdown */
@@ -341,6 +345,45 @@
 
 .messageUser .messageText code {
   background: rgba(255, 255, 255, 0.15);
+}
+
+/* Tables - horizontal scroll for wide tables */
+.messageText table {
+  display: block;
+  width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  margin: var(--space-2) 0;
+  font-size: var(--text-xs);
+}
+
+.messageText thead {
+  display: table;
+  width: 100%;
+  table-layout: auto;
+}
+
+.messageText tbody {
+  display: table;
+  width: 100%;
+  table-layout: auto;
+}
+
+.messageText th,
+.messageText td {
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border-default);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.messageText th {
+  background: rgba(255, 255, 255, 0.05);
+  font-weight: var(--font-semibold);
+}
+
+.messageText tr:nth-child(even) {
+  background: rgba(255, 255, 255, 0.02);
 }
 
 /* Syntax Highlighter container styling */
