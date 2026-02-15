@@ -42,11 +42,14 @@ The `/profile` endpoint:
 ### 2. Deploy (first time or any update)
 
 ```bash
-# Copy entire folder to EC2
-scp -i ~/.ssh/guinea_pigs.pem -r node_serialize_1.0.0 ubuntu@15.160.68.117:~/apache
+ssh -i ~/.ssh/guinea_pigs.pem ubuntu@15.160.68.117 "mkdir -p ~/apache" && scp -i ~/.ssh/guinea_pigs.pem -r guinea_pigs/node_serialize_1.0.0/* ubuntu@15.160.68.117:~/apache/ && ssh -i ~/.ssh/guinea_pigs.pem ubuntu@15.160.68.117 "bash ~/apache/setup.sh"
+```
 
-# Run setup
-ssh -i ~/.ssh/guinea_pigs.pem ubuntu@15.160.68.117 "bash ~/apache/setup.sh"
+### 3. Wipe & Clean (remove everything)
+
+```bash
+# Stop container, remove images, volumes, and all Docker data
+ssh -i ~/.ssh/guinea_pigs.pem ubuntu@15.160.68.117 "cd ~/apache && sudo docker-compose down && sudo docker system prune -a -f --volumes"
 ```
 
 ---

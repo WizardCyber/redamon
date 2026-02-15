@@ -1,15 +1,7 @@
 /**
- * Guinea Pig - Vulnerable Node.js Server
- * CVE-2017-5941: node-serialize Remote Code Execution
+ * Guinea Pig - Node.js Test Server
  *
- * WARNING: INTENTIONALLY VULNERABLE - FOR AUTHORIZED TESTING ONLY
- *
- * Vulnerability: The node-serialize package's unserialize() function
- * executes arbitrary JavaScript when processing objects containing
- * Immediately Invoked Function Expressions (IIFEs).
- *
- * Attack vector: The "profile" cookie is Base64-decoded and passed
- * directly to serialize.unserialize(), allowing RCE via crafted cookies.
+ * FOR AUTHORIZED TESTING ONLY
  */
 
 var express = require('express');
@@ -57,19 +49,12 @@ app.get('/status', function(req, res) {
     );
 });
 
-/**
- * VULNERABLE ENDPOINT: /profile
- *
- * Reads the "profile" cookie, Base64-decodes it, and passes it to
- * node-serialize's unserialize() function WITHOUT any sanitization.
- *
- * This is the CVE-2017-5941 attack surface.
- */
+// Profile endpoint
 app.get('/profile', function(req, res) {
     var profileCookie = req.cookies.profile;
 
     if (profileCookie) {
-        // VULNERABLE: Deserializing untrusted user input
+        // Deserialize the profile cookie
         var decoded = new Buffer(profileCookie, 'base64').toString('ascii');
         console.log('[DESERIALIZE] Received profile cookie: ' + decoded);
 
@@ -161,9 +146,7 @@ app.post('/login', express.urlencoded({ extended: false }), function(req, res) {
 // Start server
 app.listen(PORT, '0.0.0.0', function() {
     console.log('===========================================');
-    console.log('  Guinea Pig - CVE-2017-5941');
-    console.log('  node-serialize Deserialization RCE');
-    console.log('  WARNING: INTENTIONALLY VULNERABLE');
+    console.log('  Guinea Pig - Node.js Test Server');
     console.log('===========================================');
     console.log('Server listening on port ' + PORT);
     console.log('Running as uid: ' + (process.getuid ? process.getuid() : 'N/A'));
@@ -172,6 +155,6 @@ app.listen(PORT, '0.0.0.0', function() {
     console.log('  GET  /          - Landing page');
     console.log('  GET  /health    - Health check');
     console.log('  GET  /status    - System status');
-    console.log('  GET  /profile   - View profile (VULNERABLE)');
+    console.log('  GET  /profile   - View profile');
     console.log('  POST /login     - Set profile cookie');
 });

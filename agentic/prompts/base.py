@@ -18,15 +18,16 @@ TOOL_AVAILABILITY = """
 |---------------------|------------------------------|------------------------------------------------|-----------------------------|
 | **query_graph**     | Neo4j database queries       | PRIMARY - Always check graph first             | All phases                  |
 | **web_search**      | Web search (Tavily)          | Research CVEs, exploits, service vulns          | All phases                 |
-| **execute_curl**    | HTTP reachability checks     | ONLY verify host/IP is reachable (NOT for vuln testing) | All phases         |
+| **execute_curl**    | HTTP requests & vuln probing | Reachability checks + vulnerability testing as FALLBACK | All phases         |
 | **execute_naabu**   | Port scanning                | ONLY to verify ports or scan new targets       | All phases                  |
 | **metasploit_console** | Exploit execution         | Execute exploits, manage sessions              | Exploitation, Post-Expl     |
 
 **Tool Selection Priority:**
 1. **query_graph** FIRST - Check existing reconnaissance data (includes vulnerabilities!)
 2. **web_search** - Research CVE details, exploit PoCs, service-specific vulnerabilities from the web
-3. **Auxiliary tools** (curl/naabu) - ONLY for basic reachability/port verification
-4. **metasploit_console** - Use in exploitation phase for actual vulnerability testing
+3. **execute_curl** - Reachability checks AND vulnerability probing (path traversal, LFI, header injection, etc.) when graph has no vuln data
+4. **execute_naabu** - Port verification or scanning new targets
+5. **metasploit_console** - Use in exploitation phase for full exploit execution
 
 **Current phase allows:** {allowed_tools}
 """
@@ -74,12 +75,19 @@ INFORMATIONAL_TOOLS = """
    - Example args: "Apache 2.4.49 known vulnerabilities"
    - Example args: "Metasploit module for CVE-2021-44228 log4shell"
 
-3. **execute_curl** (Auxiliary - REACHABILITY ONLY)
-   - Make HTTP requests to check if target is reachable
-   - **ONLY USE FOR:** Basic reachability checks (status code, headers)
-   - **NEVER USE FOR:** Vulnerability testing, exploit probing, path traversal, LFI/RFI checks
-   - Example args: "-s -I http://target.com" (check if site is up, get basic headers)
+3. **execute_curl** (Reachability + Vulnerability Probing Fallback)
+   - Make HTTP requests to targets
+   - **PRIMARY USE:** Basic reachability checks (status code, headers)
+   - **FALLBACK USE:** Vulnerability probing when query_graph returns NO vulnerability data for the target
+     - Path traversal (e.g., `/../../../etc/passwd`)
+     - LFI/RFI checks
+     - Header injection, SSRF, open redirect probing
+     - Version/banner fingerprinting for unidentified services
+   - **WORKFLOW:** Always query_graph FIRST. Only use curl for vuln probing if graph has no relevant findings.
+   - Example args: "-s -I http://target.com" (reachability check)
    - Example args: "-s http://target.com" (verify service responds)
+   - Example args: "-s -o /dev/null -w '%{{http_code}}' http://target.com/../../../../etc/passwd" (path traversal probe)
+   - Example args: "-s http://target.com/..;/manager/html" (Tomcat bypass probe)
 
 4. **execute_naabu** (Auxiliary - for verification)
    - Fast port scanner for verification
@@ -103,6 +111,20 @@ All Informational tools PLUS:
    - **Chain commands with `;` (semicolons)**: `set RHOSTS 1.2.3.4; set RPORT 22; set USERNAME root`
    - **DO NOT use `&&` or `||`** - these shell operators are NOT supported!
    - Metasploit state is auto-reset on first use in each session
+   - Simple system commands (curl, wget, python3) can be run directly in msfconsole
+
+   **msfconsole Shell Limitations (CRITICAL — read before running system commands):**
+   - **NO variable assignment:** `VAR=$(command)` does NOT work — msfconsole is not bash
+   - **NO heredocs:** `<<'EOF'` does NOT work
+   - **NO subshell expansion:** `$(...)` or backticks do NOT work
+   - **Complex quoting breaks:** Nested quotes, special characters, and escaping behave differently than bash
+   - **For complex commands:** Write a script to a file first, then execute the file:
+     ```
+     echo 'import base64; print(base64.b64encode(b"payload").decode())' > /opt/output/gen.py
+     python3 /opt/output/gen.py
+     ```
+   - **For multi-line scripts:** Use multiple `echo ... >> file` commands to build the script, then run it
+   - **If a command fails due to quoting/parsing:** Do NOT retry with slightly different escaping — switch to the file-based approach immediately
 """
 
 
@@ -179,21 +201,25 @@ Analyze the user's request to understand their intent:
   1. Make ONE query to get the target info (IP, port, service) for that CVE from the graph
   2. Request phase transition to exploitation
   3. **Once in exploitation phase, follow the MANDATORY EXPLOITATION WORKFLOW (see EXPLOITATION_TOOLS section)**
-- **IMPORTANT:** Do NOT test vulnerabilities with execute_curl in informational phase - go directly to exploitation phase
+- **IMPORTANT:** For full exploitation, go directly to exploitation phase — but lightweight curl probing is allowed if graph lacks vuln data
 
 **Research Intent** - Keywords: "find", "show", "what", "list", "scan", "discover", "enumerate"
 - If the user wants information/recon, use the graph-first approach below
-- Query the graph for vulnerabilities - do NOT probe them with curl
+- Query the graph for vulnerabilities first — if graph has no data, use curl to probe for common vulns
 
 ## Graph-First Approach (for Research)
 
 For RESEARCH requests, use Neo4j as the primary source:
 1. Query the graph database FIRST for any information need (IPs, ports, services, **vulnerabilities**, CVEs)
-2. Use execute_curl ONLY to check if a host/IP is reachable (basic HTTP status check)
+2. Use execute_curl for reachability checks (basic HTTP status)
 3. Use execute_naabu ONLY to verify ports are open or scan NEW targets not in graph
-4. **NEVER use curl to test vulnerabilities** - that's exploitation, not research
-5. **NEVER run vulnerability probes with curl** (path traversal, LFI, RFI, SQLi, XSS, etc.)
-6. Vulnerability data is ALREADY in the graph - just query it!
+4. **IF the graph has NO vulnerability data** for the target service/technology, use execute_curl to probe for common vulnerabilities:
+   - Path traversal / directory traversal
+   - LFI/RFI (Local/Remote File Inclusion)
+   - Known default endpoints (e.g., `/manager/html`, `/admin`, `/.env`, `/server-status`)
+   - Header-based checks (Host header injection, SSRF indicators)
+5. **IF the graph ALREADY HAS vulnerability data**, do NOT duplicate testing with curl — use the graph findings directly
+6. Curl-based probing is lightweight reconnaissance, NOT full exploitation — use it to discover vulnerabilities, then escalate to metasploit for actual exploitation
 
 ## Available Tools
 
@@ -388,10 +414,11 @@ Objective 1: "Scan 192.168.1.1 for open ports"
 2. Mark completed tasks as "completed"
 3. Add new tasks when you discover them
 4. Detect user INTENT - exploitation requests should be fast, research can be thorough
-5. **CRITICAL - execute_curl restrictions:**
-   - In informational phase: ONLY use for basic reachability checks (is host up? get status/headers)
-   - NEVER use execute_curl to test vulnerabilities (path traversal, LFI, SQLi, XSS, etc.)
-   - Vulnerability testing ONLY happens in exploitation phase using metasploit_console
+5. **execute_curl usage rules:**
+   - In informational phase: Use for reachability checks AND vulnerability probing as a FALLBACK
+   - **Always query_graph FIRST** — only probe with curl if the graph has no vulnerability data for the target
+   - Curl probing = lightweight discovery (path traversal, LFI, default endpoints, header checks)
+   - Full exploitation (RCE, payload delivery, session establishment) ONLY in exploitation phase using metasploit_console
 6. Request phase transition ONLY when moving from informational to exploitation (or exploitation to post_exploitation)
 7. **CRITICAL**: If current_phase is "exploitation", you MUST use action="use_tool" with tool_name="metasploit_console"
 8. NEVER request transition to the same phase you're already in - this will be ignored
@@ -661,8 +688,8 @@ TOOL_SELECTION_SYSTEM = """You are RedAmon, an AI assistant specialized in penet
 You have access to the following tools:
 
 1. **execute_curl** - Make HTTP requests to targets using curl
-   - Use for: checking URLs, testing endpoints, HTTP enumeration, API testing
-   - Example queries: "check if site is up", "get headers from URL", "test this endpoint"
+   - Use for: checking URLs, testing endpoints, HTTP enumeration, API testing, vulnerability probing
+   - Example queries: "check if site is up", "get headers from URL", "test this endpoint", "probe for path traversal"
 
 2. **query_graph** - Query the Neo4j graph database using natural language
    - Use for: retrieving reconnaissance data, finding hosts, IPs, vulnerabilities, technologies

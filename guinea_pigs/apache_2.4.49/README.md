@@ -30,7 +30,12 @@ scp -i ~/.ssh/guinea_pigs.pem -r apache_2.4.49 ubuntu@15.160.68.117:~
 ssh -i ~/.ssh/guinea_pigs.pem ubuntu@15.160.68.117 "bash ~/apache_2.4.49/setup.sh"
 ```
 
+### 3. Wipe & Clean (remove everything)
 
+```bash
+# Stop container, remove images, volumes, and all Docker data
+ssh -i ~/.ssh/guinea_pigs.pem ubuntu@15.160.68.117 "cd ~/apache && sudo docker-compose down && sudo docker system prune -a -f --volumes"
+```
 
 ---
 

@@ -11,6 +11,30 @@ Vulnerable Apache server for testing authentication bypass and NULL pointer dere
 | CVE-2017-3167 | `ap_get_basic_auth_pw()` auth bypass | 9.8 | Authentication bypass |
 | CVE-2017-3169 | `mod_ssl` NULL pointer dereference | 7.5 | DoS |
 
+## EC2 Deployment (One Command)
+
+### 1. Launch EC2
+- **AMI**: Amazon Linux 2023 or Ubuntu 22.04
+- **Type**: t2.micro
+- **Security Group**: SSH (22) + Custom TCP (8080) - your IP only
+
+### 2. Deploy (first time or any update)
+
+```bash
+# Copy entire folder to EC2
+scp -i ~/.ssh/guinea_pigs.pem -r apache_2.4.25 ubuntu@15.160.68.117:~/apache
+
+# Run setup
+ssh -i ~/.ssh/guinea_pigs.pem ubuntu@15.160.68.117 "bash ~/apache/setup.sh"
+```
+
+### 3. Wipe & Clean (remove everything)
+
+```bash
+# Stop container, remove images, volumes, and all Docker data
+ssh -i ~/.ssh/guinea_pigs.pem ubuntu@15.160.68.117 "cd ~/apache && sudo docker-compose down && sudo docker system prune -a -f --volumes"
+```
+
 ---
 
 ## Test Vulnerability

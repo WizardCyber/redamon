@@ -33,6 +33,8 @@ from .cve_exploit_prompts import (
     CVE_EXPLOIT_TOOLS,
     CVE_PAYLOAD_GUIDANCE_STATEFULL,
     CVE_PAYLOAD_GUIDANCE_STATELESS,
+    NO_MODULE_FALLBACK_STATEFULL,
+    NO_MODULE_FALLBACK_STATELESS,
 )
 
 # Re-export from brute force credential guess prompts
@@ -136,7 +138,13 @@ def get_phase_tools(
             # Select payload guidance based on post_expl_type
             payload_guidance = CVE_PAYLOAD_GUIDANCE_STATEFULL if is_statefull else CVE_PAYLOAD_GUIDANCE_STATELESS
             parts.append(payload_guidance)
-            # Add pre-configured session settings for statefull mode only
+            # No-module fallback when search returns no modules
+            if is_statefull:
+                parts.append(NO_MODULE_FALLBACK_STATEFULL)
+            else:
+                parts.append(NO_MODULE_FALLBACK_STATELESS)
+            # Add pre-configured session settings for statefull mode
+            # (AFTER fallback so agent sees LHOST/LPORT/BIND values)
             if is_statefull:
                 session_config = get_session_config_prompt()
                 if session_config:
@@ -186,6 +194,8 @@ __all__ = [
     "CVE_EXPLOIT_TOOLS",
     "CVE_PAYLOAD_GUIDANCE_STATEFULL",
     "CVE_PAYLOAD_GUIDANCE_STATELESS",
+    "NO_MODULE_FALLBACK_STATEFULL",
+    "NO_MODULE_FALLBACK_STATELESS",
     # Brute force credential guess
     "BRUTE_FORCE_CREDENTIAL_GUESS_TOOLS",
     "BRUTE_FORCE_CREDENTIAL_GUESS_WORDLIST_GUIDANCE",
