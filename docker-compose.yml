@@ -285,10 +285,10 @@ services:
     security_opt:
       - seccomp:unconfined
     ports:
-      - "${MCP_NAABU_PORT:-8000}:8000"
-      - "${MCP_CURL_PORT:-8001}:8001"
+      - "${MCP_NETWORK_RECON_PORT:-8000}:8000"
       - "${MCP_NUCLEI_PORT:-8002}:8002"
       - "${MCP_METASPLOIT_PORT:-8003}:8003"
+      - "${MCP_NMAP_PORT:-8004}:8004"
       - "8013:8013"
       - "4444:4444"
     volumes:
@@ -299,10 +299,10 @@ services:
       PYTHONUNBUFFERED: "1"
       MCP_TRANSPORT: sse
       MCP_HOST: 0.0.0.0
-      NAABU_PORT: "8000"
-      CURL_PORT: "8001"
+      NETWORK_RECON_PORT: "8000"
       NUCLEI_PORT: "8002"
       METASPLOIT_PORT: "8003"
+      NMAP_PORT: "8004"
       MSF_PROGRESS_PORT: "8013"
       MSF_AUTO_UPDATE: "${MSF_AUTO_UPDATE:-true}"
       NUCLEI_AUTO_UPDATE: "${NUCLEI_AUTO_UPDATE:-true}"
@@ -336,8 +336,8 @@ services:
       WS_TIMEOUT: "300"
       WS_MAX_MESSAGE_SIZE: "10485760"
       # MCP tool servers (internal docker network)
-      MCP_CURL_URL: http://kali-sandbox:8001/sse
-      MCP_NAABU_URL: http://kali-sandbox:8000/sse
+      MCP_NETWORK_RECON_URL: http://kali-sandbox:8000/sse
+      MCP_NMAP_URL: http://kali-sandbox:8004/sse
       MCP_METASPLOIT_URL: http://kali-sandbox:8003/sse
       MCP_METASPLOIT_PROGRESS_URL: http://kali-sandbox:8013/progress
       # Webapp API (internal docker network)
@@ -349,6 +349,8 @@ services:
       - ./agentic/logs:/app/logs
     depends_on:
       neo4j:
+        condition: service_healthy
+      kali-sandbox:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:

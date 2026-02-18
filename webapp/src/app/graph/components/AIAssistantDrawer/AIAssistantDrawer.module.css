@@ -676,6 +676,39 @@
   letter-spacing: 0.5px;
 }
 
+.phaseToolsIcon {
+  color: var(--accent-primary);
+  opacity: 0.6;
+  cursor: pointer;
+  transition: opacity 150ms ease;
+}
+
+.phaseToolsIcon:hover {
+  opacity: 1;
+}
+
+.phaseToolsTooltip {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.phaseToolsHeader {
+  font-size: 10px;
+  font-weight: var(--font-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 2px;
+  color: var(--color-gray-500);
+}
+
+.phaseToolsItem {
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+  color: var(--color-gray-100);
+  padding: 1px 0;
+}
+
 .iterationCount {
   font-size: 10px;
   color: var(--text-tertiary);

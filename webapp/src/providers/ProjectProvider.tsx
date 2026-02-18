@@ -10,6 +10,7 @@ export interface ProjectSummary {
   subdomainList?: string[]
   description?: string
   agentOpenaiModel?: string
+  agentToolPhaseMap?: Record<string, string[]>
   createdAt: string
   updatedAt: string
 }
@@ -61,6 +62,9 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
               subdomainList: project.subdomainList,
               description: project.description,
               agentOpenaiModel: project.agentOpenaiModel,
+              agentToolPhaseMap: typeof project.agentToolPhaseMap === 'string'
+                ? JSON.parse(project.agentToolPhaseMap)
+                : project.agentToolPhaseMap,
               createdAt: project.createdAt,
               updatedAt: project.updatedAt
             })

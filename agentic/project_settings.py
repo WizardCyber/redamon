@@ -61,6 +61,7 @@ DEFAULT_AGENT_SETTINGS: dict[str, Any] = {
         'query_graph': ['informational', 'exploitation', 'post_exploitation'],
         'execute_curl': ['informational', 'exploitation', 'post_exploitation'],
         'execute_naabu': ['informational', 'exploitation', 'post_exploitation'],
+        'execute_nmap': ['informational', 'exploitation', 'post_exploitation'],
         'metasploit_console': ['exploitation', 'post_exploitation'],
         'msf_restart': ['exploitation', 'post_exploitation'],
         'web_search': ['informational', 'exploitation', 'post_exploitation'],

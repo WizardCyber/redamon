@@ -40,7 +40,7 @@ from state import (
     summarize_trace_for_response,
     utc_now,
 )
-from project_settings import get_setting, load_project_settings
+from project_settings import get_setting, load_project_settings, get_allowed_tools_for_phase
 from tools import (
     MCPToolsManager,
     Neo4jToolManager,
@@ -55,7 +55,12 @@ from prompts import (
     PHASE_TRANSITION_MESSAGE,
     USER_QUESTION_MESSAGE,
     FINAL_REPORT_PROMPT,
+    INTERNAL_TOOLS,
     get_phase_tools,
+    build_phase_definitions,
+    build_tool_name_enum,
+    build_tool_args_section,
+    build_dynamic_rules,
 )
 from orchestrator_helpers import (
     json_dumps_safe,
@@ -527,10 +532,17 @@ class AgentOrchestrator:
         attack_path_type = state.get("attack_path_type", "cve_exploit")
         available_tools = get_phase_tools(phase, get_setting('ACTIVATE_POST_EXPL_PHASE', True), get_setting('POST_EXPL_PHASE_TYPE', 'statefull'), attack_path_type)
 
+        # Get allowed tools for the current phase (filtered, no internal tools)
+        allowed_tools = [t for t in get_allowed_tools_for_phase(phase) if t not in INTERNAL_TOOLS]
+
         system_prompt = REACT_SYSTEM_PROMPT.format(
             current_phase=phase,
+            phase_definitions=build_phase_definitions(),
             attack_path_type=attack_path_type,
             available_tools=available_tools,
+            tool_name_enum=build_tool_name_enum(allowed_tools),
+            tool_args_section=build_tool_args_section(allowed_tools),
+            dynamic_rules=build_dynamic_rules(allowed_tools),
             iteration=iteration,
             max_iterations=state.get("max_iterations", get_setting('MAX_ITERATIONS', 100)),
             objective=current_objective,  # Now uses current objective, not original

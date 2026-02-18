@@ -9,7 +9,7 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback, KeyboardEvent } from 'react'
-import { Send, Bot, User, Loader2, AlertCircle, Sparkles, RotateCcw, Shield, Target, Zap, HelpCircle, WifiOff, Wifi, Square, Play, Download } from 'lucide-react'
+import { Send, Bot, User, Loader2, AlertCircle, Sparkles, RotateCcw, Shield, Target, Zap, HelpCircle, WifiOff, Wifi, Square, Play, Download, Wrench } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
@@ -26,6 +26,7 @@ import {
 } from '@/lib/websocket-types'
 import { AgentTimeline } from './AgentTimeline'
 import { TodoListWidget } from './TodoListWidget'
+import { Tooltip } from '@/components/ui/Tooltip/Tooltip'
 import type { ThinkingItem, ToolExecutionItem } from './AgentTimeline'
 
 type Phase = 'informational' | 'exploitation' | 'post_exploitation'
@@ -53,6 +54,7 @@ interface AIAssistantDrawerProps {
   sessionId: string
   onResetSession?: () => void
   modelName?: string
+  toolPhaseMap?: Record<string, string[]>
 }
 
 const PHASE_CONFIG = {
@@ -101,6 +103,7 @@ export function AIAssistantDrawer({
   sessionId,
   onResetSession,
   modelName,
+  toolPhaseMap,
 }: AIAssistantDrawerProps) {
   const [chatItems, setChatItems] = useState<ChatItem[]>([])
   const [inputValue, setInputValue] = useState('')
@@ -912,6 +915,31 @@ export function AIAssistantDrawer({
             {PHASE_CONFIG[currentPhase].label}
           </span>
         </div>
+
+        {/* Phase Tools Icon */}
+        {toolPhaseMap && (() => {
+          const phaseTools = Object.entries(toolPhaseMap)
+            .filter(([, phases]) => phases.includes(currentPhase))
+            .map(([name]) => name)
+          return phaseTools.length > 0 ? (
+            <Tooltip
+              position="bottom"
+              content={
+                <div className={styles.phaseToolsTooltip}>
+                  <div className={styles.phaseToolsHeader}>Phase Tools</div>
+                  {phaseTools.map(t => (
+                    <div key={t} className={styles.phaseToolsItem}>{t}</div>
+                  ))}
+                </div>
+              }
+            >
+              <Wrench
+                size={13}
+                className={styles.phaseToolsIcon}
+              />
+            </Tooltip>
+          ) : null
+        })()}
 
         {/* Attack Path Badge - Show when in exploitation or post_exploitation phase */}
         {(currentPhase === 'exploitation' || currentPhase === 'post_exploitation') && (

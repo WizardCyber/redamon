@@ -7,7 +7,6 @@ Includes phase-aware tool management.
 
 import os
 import re
-import json
 import asyncio
 import logging
 from typing import List, Optional, Dict, Callable, Awaitable, TYPE_CHECKING
@@ -61,19 +60,22 @@ class MCPToolsManager:
 
     def __init__(
         self,
-        curl_url: str = None,
-        naabu_url: str = None,
+        network_recon_url: str = None,
+        nmap_url: str = None,
         metasploit_url: str = None,
     ):
-        self.curl_url = curl_url or os.environ.get('MCP_CURL_URL', 'http://host.docker.internal:8001/sse')
-        self.naabu_url = naabu_url or os.environ.get('MCP_NAABU_URL', 'http://host.docker.internal:8000/sse')
+        self.network_recon_url = network_recon_url or os.environ.get('MCP_NETWORK_RECON_URL', 'http://host.docker.internal:8000/sse')
+        self.nmap_url = nmap_url or os.environ.get('MCP_NMAP_URL', 'http://host.docker.internal:8004/sse')
         self.metasploit_url = metasploit_url or os.environ.get('MCP_METASPLOIT_URL', 'http://host.docker.internal:8003/sse')
         self.client: Optional[MultiServerMCPClient] = None
         self._tools_cache: Dict[str, any] = {}
 
-    async def get_tools(self) -> List:
+    async def get_tools(self, max_retries: int = 5, retry_delay: float = 10.0) -> List:
         """
-        Connect to MCP servers and load tools.
+        Connect to MCP servers and load tools with retry logic.
+
+        MCP servers (kali-sandbox) may still be starting up when the agent
+        initializes. Retries with exponential backoff to handle this race condition.
 
         Returns:
             List of MCP tools available for use
@@ -81,17 +83,15 @@ class MCPToolsManager:
         logger.info("Connecting to MCP servers...")
 
         mcp_servers = {}
-        all_tools = []
 
-        # Try to connect to each MCP server
         # Timeout settings (in seconds):
         # - timeout: HTTP connection timeout (default 5s)
         # - sse_read_timeout: How long to wait for SSE events (default 300s = 5 min)
         # Metasploit needs longer timeouts for brute force attacks (30 min for large wordlists)
         server_configs = [
-            ("curl", self.curl_url, 60, 300),           # 1 min connect, 5 min read
-            ("naabu", self.naabu_url, 60, 600),         # 1 min connect, 10 min read
-            ("metasploit", self.metasploit_url, 60, 1800),  # 1 min connect, 30 min read
+            ("network_recon", self.network_recon_url, 60, 600),   # curl+naabu, 10 min read
+            ("nmap", self.nmap_url, 60, 600),                     # 10 min read
+            ("metasploit", self.metasploit_url, 60, 1800),        # 30 min read
         ]
 
         for server_name, url, timeout, sse_read_timeout in server_configs:
@@ -110,23 +110,34 @@ class MCPToolsManager:
             logger.warning("No MCP servers configured")
             return []
 
-        try:
-            self.client = MultiServerMCPClient(mcp_servers)
-            mcp_tools = await self.client.get_tools()
+        # Retry connection with backoff — MCP servers may still be starting
+        for attempt in range(1, max_retries + 1):
+            try:
+                self.client = MultiServerMCPClient(mcp_servers)
+                mcp_tools = await self.client.get_tools()
 
-            # Cache tools by name for easy access
-            for tool in mcp_tools:
-                tool_name = getattr(tool, 'name', str(tool))
-                self._tools_cache[tool_name] = tool
-                all_tools.append(tool)
+                all_tools = []
+                # Cache tools by name for easy access
+                for tool in mcp_tools:
+                    tool_name = getattr(tool, 'name', str(tool))
+                    self._tools_cache[tool_name] = tool
+                    all_tools.append(tool)
 
-            logger.info(f"Loaded {len(all_tools)} tools from MCP servers: {list(self._tools_cache.keys())}")
-            return all_tools
+                logger.info(f"Loaded {len(all_tools)} tools from MCP servers: {list(self._tools_cache.keys())}")
+                return all_tools
 
-        except Exception as e:
-            logger.error(f"Failed to connect to MCP servers: {e}")
-            logger.warning("Continuing without MCP tools")
-            return []
+            except Exception as e:
+                if attempt < max_retries:
+                    wait = retry_delay * attempt
+                    logger.warning(
+                        f"MCP connection attempt {attempt}/{max_retries} failed: {e}. "
+                        f"Retrying in {wait:.0f}s..."
+                    )
+                    await asyncio.sleep(wait)
+                else:
+                    logger.error(f"Failed to connect to MCP servers after {max_retries} attempts: {e}")
+                    logger.warning("Continuing without MCP tools")
+                    return []
 
     def get_tool_by_name(self, name: str) -> Optional[any]:
         """Get a specific tool by name."""

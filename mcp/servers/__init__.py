@@ -5,9 +5,9 @@ MCP (Model Context Protocol) servers for agentic penetration testing.
 These servers expose security tools to AI agents via the MCP protocol.
 
 Servers:
-    - naabu_server: Port scanning (dynamic CLI)
+    - network_recon_server: HTTP client (curl) & port scanning (naabu)
     - nuclei_server: Vulnerability scanning (dynamic CLI)
-    - curl_server: HTTP requests (dynamic CLI)
+    - nmap_server: Network mapper (service detection, OS fingerprint, NSE scripts)
     - metasploit_server: Exploitation framework (structured tools)
 """
 

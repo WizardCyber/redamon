@@ -4,33 +4,170 @@ RedAmon Agent Base Prompts
 Common prompts used across all attack paths.
 """
 
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from .tool_registry import TOOL_REGISTRY
 
 
 # =============================================================================
-# TOOL AVAILABILITY AND MODE MATRICES
+# TOOL REGISTRY — imported from tool_registry.py (single source of truth)
 # =============================================================================
 
-TOOL_AVAILABILITY = """
-## Available Tools (Current Phase: {phase})
+# Internal tools that exist in the phase map but are never shown to the LLM
+INTERNAL_TOOLS = {"msf_restart"}
 
-| Tool                | Purpose                      | When to Use                                    | Phase Availability          |
-|---------------------|------------------------------|------------------------------------------------|-----------------------------|
-| **query_graph**     | Neo4j database queries       | PRIMARY - Always check graph first             | All phases                  |
-| **web_search**      | Web search (Tavily)          | Research CVEs, exploits, service vulns          | All phases                 |
-| **execute_curl**    | HTTP requests & vuln probing | Reachability checks + vulnerability testing as FALLBACK | All phases         |
-| **execute_naabu**   | Port scanning                | ONLY to verify ports or scan new targets       | All phases                  |
-| **metasploit_console** | Exploit execution         | Execute exploits, manage sessions              | Exploitation, Post-Expl     |
 
-**Tool Selection Priority:**
-1. **query_graph** FIRST - Check existing reconnaissance data (includes vulnerabilities!)
-2. **web_search** - Research CVE details, exploit PoCs, service-specific vulnerabilities from the web
-3. **execute_curl** - Reachability checks AND vulnerability probing (path traversal, LFI, header injection, etc.) when graph has no vuln data
-4. **execute_naabu** - Port verification or scanning new targets
-5. **metasploit_console** - Use in exploitation phase for full exploit execution
+# =============================================================================
+# DYNAMIC PROMPT BUILDERS
+# =============================================================================
 
-**Current phase allows:** {allowed_tools}
-"""
+def _get_visible_tools(allowed_tools):
+    """Get TOOL_REGISTRY entries for allowed tools, preserving registry order."""
+    return [
+        (name, info) for name, info in TOOL_REGISTRY.items()
+        if name in allowed_tools and name not in INTERNAL_TOOLS
+    ]
+
+
+def build_tool_availability_table(phase, allowed_tools):
+    """Build the tool availability table showing only tools allowed in the current phase."""
+    visible = _get_visible_tools(allowed_tools)
+
+    if not visible:
+        return f"\n## Available Tools (Current Phase: {phase})\n\nNo tools available in this phase.\n"
+
+    lines = [
+        f"\n## Available Tools (Current Phase: {phase})\n",
+        "| Tool                | Purpose                      | When to Use                                    |",
+        "|---------------------|------------------------------|------------------------------------------------|",
+    ]
+    for name, info in visible:
+        lines.append(f"| **{name}** | {info['purpose']} | {info['when_to_use']} |")
+
+    lines.append("\n**Tool Selection Priority:**")
+    for i, (name, info) in enumerate(visible, 1):
+        lines.append(f"{i}. **{name}** - {info['when_to_use']}")
+
+    lines.append(f"\n**Current phase allows:** {', '.join(t[0] for t in visible)}")
+    return "\n".join(lines) + "\n"
+
+
+def build_informational_tool_descriptions(allowed_tools):
+    """Build detailed tool descriptions for only the allowed tools."""
+    visible = [
+        (name, info) for name, info in _get_visible_tools(allowed_tools)
+        if info.get("description")
+    ]
+
+    if not visible:
+        return ""
+
+    parts = ["### Phase Tools\n"]
+    for i, (name, info) in enumerate(visible, 1):
+        parts.append(f"{i}. {info['description']}\n")
+
+    return "\n".join(parts)
+
+
+def build_tool_args_section(allowed_tools):
+    """Build the tool arguments reference for allowed tools only."""
+    visible = _get_visible_tools(allowed_tools)
+    if not visible:
+        return ""
+
+    lines = ["### Tool Arguments:"]
+    for name, info in visible:
+        lines.append(f"- {name}: {{{{{info['args_format']}}}}}")
+    return "\n".join(lines)
+
+
+def build_tool_name_enum(allowed_tools):
+    """Build the tool_name enum string for JSON examples."""
+    visible = _get_visible_tools(allowed_tools)
+    return ", ".join(name for name, _ in visible)
+
+
+def build_phase_definitions():
+    """Build Phase Definitions section with actual allowed tools per phase from DB."""
+    from project_settings import get_allowed_tools_for_phase
+
+    def _fmt(phase):
+        tools = [t for t in get_allowed_tools_for_phase(phase) if t not in INTERNAL_TOOLS]
+        registry_order = list(TOOL_REGISTRY.keys())
+        tools.sort(key=lambda t: registry_order.index(t) if t in registry_order else len(registry_order))
+        return ", ".join(tools) if tools else "(none)"
+
+    info_str = _fmt("informational")
+    expl_str = _fmt("exploitation")
+    post_str = _fmt("post_exploitation")
+
+    expl_tools = [t for t in get_allowed_tools_for_phase("exploitation") if t not in INTERNAL_TOOLS]
+
+    lines = [
+        "### Phase Definitions\n",
+        "**INFORMATIONAL** (Default starting phase)",
+        "- Purpose: Gather intelligence, understand the target, verify data",
+        f"- Allowed tools: {info_str}",
+        "- Neo4j contains existing reconnaissance data - this is your primary source of truth\n",
+        "**EXPLOITATION** (Requires user approval to enter)",
+        "- Purpose: Actively exploit confirmed vulnerabilities",
+        f"- Allowed tools: {expl_str}",
+        "- Prerequisites: Must have confirmed vulnerability AND user approval",
+    ]
+
+    if "metasploit_console" in expl_tools:
+        lines.append('- CRITICAL: If current_phase is "exploitation", you MUST use action="use_tool" with tool_name="metasploit_console"')
+
+    lines.extend([
+        "- DO NOT request transition_phase when already in exploitation - START EXPLOITING IMMEDIATELY\n",
+        "**POST-EXPLOITATION** (Requires user approval to enter)",
+        "- Purpose: Actions on compromised systems",
+        f"- Allowed tools: {post_str}",
+        "- Prerequisites: Must have active session AND user approval",
+    ])
+
+    return "\n".join(lines)
+
+
+def build_dynamic_rules(allowed_tools):
+    """Build the Important Rules section, including only rules for allowed tools."""
+    rules = [
+        "### Important Rules:",
+        "1. ALWAYS update the todo_list to track progress",
+        '2. Mark completed tasks as "completed"',
+        "3. Add new tasks when you discover them",
+        "4. Detect user INTENT - exploitation requests should be fast, research can be thorough",
+    ]
+
+    rule_num = 5
+
+    if "execute_curl" in allowed_tools:
+        rules.append(f"{rule_num}. **execute_curl usage rules:**")
+        rules.append("   - In informational phase: Use for reachability checks AND vulnerability probing as a FALLBACK")
+        if "query_graph" in allowed_tools:
+            rules.append("   - **Always query_graph FIRST** — only probe with curl if the graph has no vulnerability data for the target")
+        rules.append("   - Curl probing = lightweight discovery (path traversal, LFI, default endpoints, header checks)")
+        if "metasploit_console" in allowed_tools:
+            rules.append("   - Full exploitation (RCE, payload delivery, session establishment) ONLY in exploitation phase using metasploit_console")
+        rule_num += 1
+
+    rules.append(f"{rule_num}. Request phase transition ONLY when moving from informational to exploitation (or exploitation to post_exploitation)")
+    rule_num += 1
+
+    if "metasploit_console" in allowed_tools:
+        rules.append(f'{rule_num}. **CRITICAL**: If current_phase is "exploitation", you MUST use action="use_tool" with tool_name="metasploit_console"')
+        rule_num += 1
+
+    rules.append(f"{rule_num}. NEVER request transition to the same phase you're already in - this will be ignored")
+    rule_num += 1
+    rules.append(f"{rule_num}. **Follow the detailed Metasploit workflow** in the EXPLOITATION_TOOLS section - complete ALL steps before exploitation")
+    rule_num += 1
+    rules.append(f"{rule_num}. **Add exploitation steps as TODO items** and mark them in_progress/completed as you go")
+
+    return "\n".join(rules)
+
+
+# =============================================================================
+# MODE DECISION MATRIX
+# =============================================================================
 
 MODE_DECISION_MATRIX = """
 ## Current Mode: {mode}
@@ -45,54 +182,6 @@ MODE_DECISION_MATRIX = """
 - **Post-exploitation:** {post_expl_note}
 
 **Important:** TARGET selection MUST match your mode. Wrong TARGET type means exploit may succeed but you get no session (statefull) or no output (stateless).
-"""
-
-
-# =============================================================================
-# INFORMATIONAL PHASE TOOLS
-# =============================================================================
-
-INFORMATIONAL_TOOLS = """
-### Informational Phase Tools
-
-1. **query_graph** (PRIMARY - Always use first!)
-   - Query Neo4j graph database using natural language
-   - Contains: Domains, Subdomains, IPs, Ports, Services, Technologies, Vulnerabilities, CVEs, GitHub Secrets (leaked credentials, sensitive files from repositories)
-   - This is your PRIMARY source of truth for reconnaissance data
-   - Example: "Show all critical vulnerabilities for this project"
-   - Example: "What ports are open on 10.0.0.5?"
-   - Example: "What technologies are running on the target?"
-   - Example: "What GitHub secrets were found for this project?"
-   - Example: "Show leaked credentials from GitHub repositories"
-
-2. **web_search** (SECONDARY - Research from the web)
-   - Search the internet for security research information via Tavily
-   - Use AFTER query_graph when you need external context not in the graph
-   - **USE FOR:** CVE details, exploit PoCs, version-specific vulnerabilities, attack techniques
-   - **USE FOR:** Metasploit module documentation, security advisories, vendor bulletins
-   - **DO NOT USE AS:** A replacement for query_graph (graph has project-specific recon data)
-   - Example args: "CVE-2021-41773 Apache path traversal exploit PoC"
-   - Example args: "Apache 2.4.49 known vulnerabilities"
-   - Example args: "Metasploit module for CVE-2021-44228 log4shell"
-
-3. **execute_curl** (Reachability + Vulnerability Probing Fallback)
-   - Make HTTP requests to targets
-   - **PRIMARY USE:** Basic reachability checks (status code, headers)
-   - **FALLBACK USE:** Vulnerability probing when query_graph returns NO vulnerability data for the target
-     - Path traversal (e.g., `/../../../etc/passwd`)
-     - LFI/RFI checks
-     - Header injection, SSRF, open redirect probing
-     - Version/banner fingerprinting for unidentified services
-   - **WORKFLOW:** Always query_graph FIRST. Only use curl for vuln probing if graph has no relevant findings.
-   - Example args: "-s -I http://target.com" (reachability check)
-   - Example args: "-s http://target.com" (verify service responds)
-   - Example args: "-s -o /dev/null -w '%{{http_code}}' http://target.com/../../../../etc/passwd" (path traversal probe)
-   - Example args: "-s http://target.com/..;/manager/html" (Tomcat bypass probe)
-
-4. **execute_naabu** (Auxiliary - for verification)
-   - Fast port scanner for verification
-   - Use ONLY to verify ports are actually open or scan new targets not in graph
-   - Example args: "-host 10.0.0.5 -p 80,443,8080 -json"
 """
 
 
@@ -144,24 +233,7 @@ You work step-by-step using the Thought-Tool-Output pattern:
 
 ## Current Phase: {current_phase}
 
-### Phase Definitions
-
-**INFORMATIONAL** (Default starting phase)
-- Purpose: Gather intelligence, understand the target, verify data
-- Allowed tools: query_graph (PRIMARY), execute_curl, execute_naabu
-- Neo4j contains existing reconnaissance data - this is your primary source of truth
-
-**EXPLOITATION** (Requires user approval to enter)
-- Purpose: Actively exploit confirmed vulnerabilities
-- Allowed tools: All informational tools + metasploit_console (USE THEM!)
-- Prerequisites: Must have confirmed vulnerability AND user approval
-- CRITICAL: If current_phase is "exploitation", you MUST use action="use_tool" with tool_name="metasploit_console"
-- DO NOT request transition_phase when already in exploitation - START EXPLOITING IMMEDIATELY
-
-**POST-EXPLOITATION** (Requires user approval to enter)
-- Purpose: Actions on compromised systems
-- Allowed tools: All tools including session interaction
-- Prerequisites: Must have active session AND user approval
+{phase_definitions}
 
 ## Orchestrator Auto-Logic (Behind the Scenes)
 
@@ -291,7 +363,7 @@ Based on the context above, decide your next action. You MUST output valid JSON:
     "thought": "Your analysis of the current situation and what needs to be done next",
     "reasoning": "Why you chose this specific action over alternatives",
     "action": "<one of: use_tool, transition_phase, complete, ask_user>",
-    "tool_name": "<only if action=use_tool: query_graph, web_search, execute_curl, execute_naabu, or metasploit_console>",
+    "tool_name": "<only if action=use_tool: {tool_name_enum}>",
     "tool_args": "<only if action=use_tool: {{'question': '...'}} or {{'args': '...'}} or {{'command': '...'}}",
     "phase_transition": "<only if action=transition_phase>",
     "user_question": "<only if action=ask_user>",
@@ -402,28 +474,9 @@ Objective 1: "Scan 192.168.1.1 for open ports"
 - If the exploit command output shows success (no errors, command executed) -> Trust it and complete
 - Only verify if the output is unclear or shows errors
 
-### Tool Arguments:
-- query_graph: {{"question": "natural language question about the graph data"}}
-- web_search: {{"query": "search query for CVE details, exploit techniques, etc."}}
-- execute_curl: {{"args": "curl command arguments without 'curl' prefix"}}
-- execute_naabu: {{"args": "naabu arguments without 'naabu' prefix"}}
-- metasploit_console: {{"command": "msfconsole command to execute"}}
+{tool_args_section}
 
-### Important Rules:
-1. ALWAYS update the todo_list to track progress
-2. Mark completed tasks as "completed"
-3. Add new tasks when you discover them
-4. Detect user INTENT - exploitation requests should be fast, research can be thorough
-5. **execute_curl usage rules:**
-   - In informational phase: Use for reachability checks AND vulnerability probing as a FALLBACK
-   - **Always query_graph FIRST** — only probe with curl if the graph has no vulnerability data for the target
-   - Curl probing = lightweight discovery (path traversal, LFI, default endpoints, header checks)
-   - Full exploitation (RCE, payload delivery, session establishment) ONLY in exploitation phase using metasploit_console
-6. Request phase transition ONLY when moving from informational to exploitation (or exploitation to post_exploitation)
-7. **CRITICAL**: If current_phase is "exploitation", you MUST use action="use_tool" with tool_name="metasploit_console"
-8. NEVER request transition to the same phase you're already in - this will be ignored
-9. **Follow the detailed Metasploit workflow** in the EXPLOITATION_TOOLS section - complete ALL steps before exploitation
-10. **Add exploitation steps as TODO items** and mark them in_progress/completed as you go
+{dynamic_rules}
 
 ### When to Ask User (action="ask_user"):
 Use ask_user when you need user input that cannot be determined from available data:
@@ -443,83 +496,6 @@ Use ask_user when you need user input that cannot be determined from available d
 - Use "text" for open-ended questions (e.g., "What IP range should I scan?")
 - Use "single_choice" for mutually exclusive options (e.g., "Which exploit should I use?")
 - Use "multi_choice" when user can select multiple items (e.g., "Which sessions to interact with?")
-"""
-
-
-# =============================================================================
-# OUTPUT ANALYSIS PROMPT
-# =============================================================================
-
-OUTPUT_ANALYSIS_PROMPT = """Analyze the tool output and extract relevant information.
-
-## Tool: {tool_name}
-## Arguments: {tool_args}
-
-## Output:
-{tool_output}
-
-## Current Target Intelligence:
-{current_target_info}
-
-## Your Task
-
-1. Interpret what this output means for the penetration test
-2. Extract any new information to add to target intelligence
-3. Identify actionable findings
-4. **Exploit Success Detection**: Determine if this output shows that exploitation SUCCEEDED.
-   Set `exploit_succeeded: true` if you see ANY of these:
-   - A Metasploit session was opened (e.g., "Meterpreter session 1 opened", "Command shell session 1 opened")
-   - Brute force credentials were found (e.g., "[+] Success: 'root:toor'", "[+] Login Successful: user:pass")
-   - A stateless exploit returned meaningful output proving compromise (e.g., file contents from path traversal like /etc/passwd, command output from RCE like "uid=0(root)", database dumps, sensitive data)
-   - Any clear evidence the target was compromised
-
-   Do NOT set `exploit_succeeded: true` for:
-   - Partial progress (e.g., "Sending stage..." without "session opened")
-   - Failed attempts (e.g., "Exploit completed, but no session was created")
-   - Information gathering (e.g., port scans, version detection, service enumeration)
-   - Module configuration output (e.g., "set RHOSTS", "show options")
-
-Output valid JSON:
-```json
-{{
-    "interpretation": "What this output tells us about the target",
-    "extracted_info": {{
-        "primary_target": "IP or hostname if discovered",
-        "ports": [80, 443],
-        "services": ["http", "https"],
-        "technologies": ["nginx", "PHP"],
-        "vulnerabilities": ["CVE-2021-41773"],
-        "credentials": [],
-        "sessions": []
-    }},
-    "actionable_findings": [
-        "Finding 1 that requires follow-up",
-        "Finding 2 that requires follow-up"
-    ],
-    "recommended_next_steps": [
-        "Suggested next action 1",
-        "Suggested next action 2"
-    ],
-    "exploit_succeeded": false,
-    "exploit_details": null
-}}
-```
-
-Only include fields in extracted_info that have new information.
-
-When `exploit_succeeded` is true, fill `exploit_details` with:
-```json
-{{
-    "attack_type": "cve_exploit or brute_force",
-    "target_ip": "IP address of the compromised target",
-    "target_port": 80,
-    "cve_ids": ["CVE-2021-41773"],
-    "username": "compromised username or null",
-    "password": "compromised password or null",
-    "session_id": 1,
-    "evidence": "Brief description of what proves the exploit worked"
-}}
-```
 """
 
 
@@ -677,44 +653,6 @@ Generate a concise but comprehensive report including:
 6. **Recommendations**: Next steps or remediation advice
 7. **Limitations**: What couldn't be tested or verified
 """
-
-
-# =============================================================================
-# LEGACY PROMPTS (for backward compatibility)
-# =============================================================================
-
-TOOL_SELECTION_SYSTEM = """You are RedAmon, an AI assistant specialized in penetration testing and security reconnaissance.
-
-You have access to the following tools:
-
-1. **execute_curl** - Make HTTP requests to targets using curl
-   - Use for: checking URLs, testing endpoints, HTTP enumeration, API testing, vulnerability probing
-   - Example queries: "check if site is up", "get headers from URL", "test this endpoint", "probe for path traversal"
-
-2. **query_graph** - Query the Neo4j graph database using natural language
-   - Use for: retrieving reconnaissance data, finding hosts, IPs, vulnerabilities, technologies
-   - The database contains: Domains, Subdomains, IPs, Ports, Technologies, Vulnerabilities, CVEs
-   - Example queries: "what hosts are in the database", "show vulnerabilities", "find all IPs"
-
-## Instructions
-
-1. Analyze the user's question carefully
-2. Select the most appropriate tool for the task
-3. Execute the tool with proper parameters
-4. Provide a clear, concise answer based on the tool output
-
-## Response Guidelines
-
-- Be concise and technical
-- Include relevant details from tool output
-- If a tool fails, explain the error clearly
-- Never make up data - only report what tools return
-"""
-
-TOOL_SELECTION_PROMPT = ChatPromptTemplate.from_messages([
-    ("system", TOOL_SELECTION_SYSTEM),
-    MessagesPlaceholder(variable_name="messages"),
-])
 
 
 TEXT_TO_CYPHER_SYSTEM = """You are a Neo4j Cypher query expert for a security reconnaissance database.
@@ -1092,24 +1030,3 @@ RETURN s.name, collect(t.name) as technologies
 Generate ONLY valid Cypher queries. No explanations, no markdown formatting.
 """
 
-TEXT_TO_CYPHER_PROMPT = ChatPromptTemplate.from_messages([
-    ("system", TEXT_TO_CYPHER_SYSTEM),
-    ("human", "{question}"),
-])
-
-
-FINAL_ANSWER_SYSTEM = """You are RedAmon, summarizing tool execution results.
-
-Based on the tool output provided, give a clear and concise answer to the user's question.
-
-Guidelines:
-- Be technical and precise
-- Highlight key findings
-- If the output is an error, explain what went wrong
-- Keep responses focused and actionable
-"""
-
-FINAL_ANSWER_PROMPT = ChatPromptTemplate.from_messages([
-    ("system", FINAL_ANSWER_SYSTEM),
-    ("human", "Tool used: {tool_name}\n\nTool output:\n{tool_output}\n\nOriginal question: {question}\n\nProvide a summary answer:"),
-])

@@ -10,7 +10,8 @@
   border-radius: var(--radius-sm);
   font-size: 10px;
   color: var(--color-gray-100);
-  white-space: nowrap;
+  white-space: normal;
+  max-width: 260px;
   pointer-events: none;
   animation: tooltipFadeIn 150ms ease-out;
 }

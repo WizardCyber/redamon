@@ -85,10 +85,10 @@ Go to **http://localhost:3000** — create a project, configure your target, and
 | Neo4j Browser | http://localhost:7474 |
 | Recon Orchestrator | http://localhost:8010 |
 | Agent API | http://localhost:8090 |
-| MCP Naabu | http://localhost:8000 |
-| MCP Curl | http://localhost:8001 |
+| MCP Network Recon (curl + naabu) | http://localhost:8000 |
 | MCP Nuclei | http://localhost:8002 |
 | MCP Metasploit | http://localhost:8003 |
+| MCP Nmap | http://localhost:8004 |
 
 ### Common Commands
 
@@ -123,7 +123,14 @@ For active development with **Next.js fast refresh** (no rebuild on every change
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 ```
 
-This swaps the production webapp image for a dev container with your source code volume-mounted. Every file save triggers instant hot-reload in the browser.
+**Without GVM (lighter, faster startup):**
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d postgres neo4j recon-orchestrator kali-sandbox agent webapp
+```
+
+The first command starts **all** services including GVM/OpenVAS (which requires a ~30 min feed sync on first run). The second command starts only the core services, skipping GVM entirely — useful when you don't need network-level vulnerability scanning and want a faster, lighter stack.
+
+Both commands swap the production webapp image for a dev container with your source code volume-mounted. Every file save triggers instant hot-reload in the browser.
 
 **Refreshing Python services after code changes:**
 
@@ -375,6 +382,8 @@ The agent executes security tools through the **Model Context Protocol**, with e
 | **web_search** | Tavily-based CVE/exploit research | All phases |
 | **execute_curl** | HTTP requests, API probing, header inspection | All phases |
 | **execute_naabu** | Fast port scanning and service detection | All phases |
+| **execute_nmap** | Deep service analysis, OS fingerprinting, NSE scripts | All phases |
+| **execute_nuclei** | Vulnerability scanning with 9,000+ templates | All phases |
 | **metasploit_console** | Exploit execution, payload delivery, sessions | Exploitation & Post-exploitation |
 
 For long-running Metasploit operations (e.g., brute force with large wordlists), the agent streams progress updates every 5 seconds to the WebSocket, so you see output in real time.
@@ -836,6 +845,8 @@ A matrix that controls which tools the agent can use in each operational phase. 
 | web_search | ✓ | ✓ | ✓ |
 | execute_curl | ✓ | ✓ | ✓ |
 | execute_naabu | ✓ | ✓ | ✓ |
+| execute_nmap | ✓ | ✓ | ✓ |
+| execute_nuclei | ✓ | ✓ | ✓ |
 | metasploit_console | — | ✓ | ✓ |
 | msf_restart | — | ✓ | ✓ |
 
@@ -862,10 +873,10 @@ flowchart TB
     end
 
     subgraph Tools["🔧 MCP Tools Layer"]
-        Naabu[Naabu Server<br/>:8000]
-        Curl[Curl Server<br/>:8001]
+        NetworkRecon[Network Recon Server<br/>Curl + Naabu<br/>:8000]
         Nuclei[Nuclei Server<br/>:8002]
         Metasploit[Metasploit Server<br/>:8003]
+        Nmap[Nmap Server<br/>:8004]
     end
 
     subgraph Scanning["🔍 Scanning Layer"]
@@ -896,21 +907,23 @@ flowchart TB
     Recon -->|Fetch Settings| Webapp
     GHHunt -->|GitHub API| GHHunt
     Agent --> Neo4j
-    Agent -->|MCP Protocol| Naabu
-    Agent -->|MCP Protocol| Curl
+    Agent -->|MCP Protocol| NetworkRecon
     Agent -->|MCP Protocol| Nuclei
     Agent -->|MCP Protocol| Metasploit
+    Agent -->|MCP Protocol| Nmap
     Recon --> Neo4j
     GVM -->|Reads Recon Output| Recon
     GVM --> Neo4j
     GVM --> Target
     GVM --> GuineaPigs
-    Naabu --> Target
+    NetworkRecon --> Target
     Nuclei --> Target
     Metasploit --> Target
-    Naabu --> GuineaPigs
+    Nmap --> Target
+    NetworkRecon --> GuineaPigs
     Nuclei --> GuineaPigs
     Metasploit --> GuineaPigs
+    Nmap --> GuineaPigs
 ```
 
 ### Data Flow Pipeline
@@ -951,8 +964,9 @@ flowchart TB
 
     subgraph Phase4["Phase 4: Exploitation"]
         Agent --> MCP[MCP Tools]
-        MCP --> Naabu2[Naabu<br/>Port Scan]
+        MCP --> NetworkRecon2[Curl + Naabu<br/>HTTP & Port Scan]
         MCP --> Nuclei2[Nuclei<br/>Vuln Verify]
+        MCP --> Nmap2[Nmap<br/>Service Detection]
         MCP --> MSF[Metasploit<br/>Exploit]
         MSF --> Shell[🐚 Shell/Meterpreter]
     end
@@ -985,10 +999,10 @@ flowchart TB
 
             subgraph MCPContainer["kali-mcp-sandbox"]
                 MCPServers[MCP Servers]
-                NaabuTool[Naabu :8000]
-                CurlTool[Curl :8001]
+                NetworkReconTool[Network Recon :8000<br/>Curl + Naabu]
                 NucleiTool[Nuclei :8002]
                 MSFTool[Metasploit :8003]
+                NmapTool[Nmap :8004]
             end
 
             subgraph AgenticContainer["agentic-container"]
@@ -1269,8 +1283,8 @@ sequenceDiagram
 
     User->>Agent: "Scan ports on 10.0.0.5"
     Agent->>Agent: Reasoning (ReAct)
-    Agent->>MCP: Request naabu tool
-    MCP->>Tool: JSON-RPC over SSE
+    Agent->>MCP: Request execute_naabu tool
+    MCP->>Tool: JSON-RPC over SSE (:8000)
     Tool->>Target: SYN Packets
     Target-->>Tool: Open Ports
     Tool-->>MCP: JSON Results
@@ -1320,12 +1334,12 @@ Domain → Subdomain → IP → Port → Service → Technology → Vulnerabilit
 
 Security tools exposed via Model Context Protocol for AI agent integration.
 
-| Server | Port | Tool | Capability |
-|--------|------|------|------------|
-| naabu | 8000 | Naabu | Fast port scanning, service detection |
-| curl | 8001 | Curl | HTTP requests, header inspection |
-| nuclei | 8002 | Nuclei | 9000+ vulnerability templates |
+| Server | Port | Tools | Capability |
+|--------|------|-------|------------|
+| network_recon | 8000 | Curl, Naabu | HTTP requests, header inspection, fast port scanning |
+| nuclei | 8002 | Nuclei | 9,000+ vulnerability templates |
 | metasploit | 8003 | Metasploit | Exploitation, post-exploitation, sessions |
+| nmap | 8004 | Nmap | Service detection, OS fingerprinting, NSE scripts |
 
 📖 **[Read MCP Documentation](mcp/README.MCP.md)**
 
@@ -1474,7 +1488,7 @@ These containers are designed to be deployed alongside the main stack so the AI 
 | **Kali Linux** | Base Platform | Penetration testing distribution used as the base Docker image for recon and MCP tool containers |
 | **Metasploit Framework** | Exploitation | Exploit execution, payload delivery, Meterpreter sessions, auxiliary scanners, and post-exploitation |
 | **Naabu** | Port Scanning | Fast SYN/CONNECT port scanner from ProjectDiscovery |
-| **Nmap** | Network Scanning | Network mapper used as fallback for service detection and banner grabbing |
+| **Nmap** | Network Scanning | Network mapper for deep service detection, OS fingerprinting, and NSE vulnerability scripts — exposed as a dedicated MCP server |
 | **Nuclei** | Vulnerability Scanning | Template-based scanner with 9,000+ community templates — DAST fuzzing, CVE detection, misconfiguration checks |
 | **Httpx** | HTTP Probing | HTTP/HTTPS probing, technology detection, TLS inspection, and response metadata extraction |
 | **Katana** | Web Crawling | Active web crawler with JavaScript rendering — discovers URLs, endpoints, forms, and parameters |
@@ -1526,7 +1540,7 @@ These containers are designed to be deployed alongside the main stack so the AI 
 
 | Protocol | Role |
 |----------|------|
-| **MCP (Model Context Protocol)** | Standardized tool integration — four MCP servers (Naabu, Curl, Nuclei, Metasploit) running inside the Kali sandbox |
+| **MCP (Model Context Protocol)** | Standardized tool integration — four MCP servers (Network Recon, Nuclei, Metasploit, Nmap) running inside the Kali sandbox |
 | **SSE (Server-Sent Events)** | Unidirectional real-time streaming for recon logs, GVM scan progress, and GitHub hunt output |
 | **WebSocket** | Bidirectional real-time communication for the agent chat interface |
 | **Bolt** (Neo4j) | Binary protocol for high-performance Neo4j graph database queries |

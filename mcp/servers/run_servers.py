@@ -53,15 +53,10 @@ logger = logging.getLogger("mcp-runner")
 
 # Server configurations
 SERVERS = {
-    "naabu": {
-        "module": "naabu_server",
+    "network_recon": {
+        "module": "network_recon_server",
         "port": 8000,
-        "description": "Port Scanner"
-    },
-    "curl": {
-        "module": "curl_server",
-        "port": 8001,
-        "description": "HTTP Client"
+        "description": "HTTP Client & Port Scanner"
     },
     "nuclei": {
         "module": "nuclei_server",
@@ -72,6 +67,11 @@ SERVERS = {
         "module": "metasploit_server",
         "port": 8003,
         "description": "Exploitation Framework"
+    },
+    "nmap": {
+        "module": "nmap_server",
+        "port": 8004,
+        "description": "Network Mapper"
     }
 }
 

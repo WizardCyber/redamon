@@ -76,7 +76,7 @@ RUN chmod +x /opt/entrypoint.sh
 WORKDIR /opt/mcp_servers
 
 # Expose ports for MCP servers (SSE/HTTP transport)
-EXPOSE 8000 8001 8002 8003
+EXPOSE 8000 8002 8003 8004
 
 # Initialize Metasploit database (speeds up first run)
 RUN msfdb init || true

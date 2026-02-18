@@ -7,22 +7,23 @@ Includes phase-aware reasoning, tool descriptions, and structured output formats
 
 # Re-export from base
 from .base import (
-    TOOL_AVAILABILITY,
+    TOOL_REGISTRY,
+    INTERNAL_TOOLS,
     MODE_DECISION_MATRIX,
-    INFORMATIONAL_TOOLS,
     METASPLOIT_CONSOLE_HEADER,
     REACT_SYSTEM_PROMPT,
-    OUTPUT_ANALYSIS_PROMPT,
     PENDING_OUTPUT_ANALYSIS_SECTION,
     PHASE_TRANSITION_MESSAGE,
     USER_QUESTION_MESSAGE,
     FINAL_REPORT_PROMPT,
-    TOOL_SELECTION_SYSTEM,
-    TOOL_SELECTION_PROMPT,
     TEXT_TO_CYPHER_SYSTEM,
-    TEXT_TO_CYPHER_PROMPT,
-    FINAL_ANSWER_SYSTEM,
-    FINAL_ANSWER_PROMPT,
+    # Dynamic prompt builders
+    build_tool_availability_table,
+    build_informational_tool_descriptions,
+    build_tool_args_section,
+    build_tool_name_enum,
+    build_phase_definitions,
+    build_dynamic_rules,
 )
 
 # Re-export from classification
@@ -50,14 +51,9 @@ from .post_exploitation import (
     POST_EXPLOITATION_TOOLS_STATELESS,
 )
 
-# Backward compatibility aliases
-EXPLOITATION_TOOLS = CVE_EXPLOIT_TOOLS
-PAYLOAD_GUIDANCE_STATEFULL = CVE_PAYLOAD_GUIDANCE_STATEFULL
-PAYLOAD_GUIDANCE_STATELESS = CVE_PAYLOAD_GUIDANCE_STATELESS
-
 # Import utilities
 from utils import get_session_config_prompt
-from project_settings import get_setting
+from project_settings import get_setting, get_allowed_tools_for_phase
 
 
 def get_phase_tools(
@@ -67,6 +63,9 @@ def get_phase_tools(
     attack_path_type: str = "cve_exploit"
 ) -> str:
     """Get tool descriptions for the current phase with attack path-specific guidance.
+
+    All tool references are dynamically filtered based on the DB TOOL_PHASE_MAP,
+    so the LLM only sees tools that are actually allowed in the current phase.
 
     Args:
         phase: Current agent phase (informational, exploitation, post_exploitation)
@@ -93,18 +92,12 @@ def get_phase_tools(
     elif phase == "post_exploitation" and post_expl_prompt:
         parts.append(f"## Custom Instructions\n\n{post_expl_prompt}\n")
 
-    # Determine allowed tools for current phase
-    if phase == "informational":
-        allowed_tools = "query_graph, web_search, execute_curl, execute_naabu"
-    elif phase == "exploitation":
-        allowed_tools = "query_graph, web_search, execute_curl, execute_naabu, metasploit_console"
-    elif phase == "post_exploitation":
-        allowed_tools = "query_graph, web_search, execute_curl, execute_naabu, metasploit_console"
-    else:
-        allowed_tools = "query_graph, web_search, execute_curl, execute_naabu"
+    # Determine allowed tools for current phase (dynamic from TOOL_PHASE_MAP in DB)
+    # Filter out internal tools that should never be shown to the LLM
+    allowed_tools = [t for t in get_allowed_tools_for_phase(phase) if t not in INTERNAL_TOOLS]
 
-    # Add tool availability matrix (concise, no redundancy)
-    parts.append(TOOL_AVAILABILITY.format(phase=phase, allowed_tools=allowed_tools))
+    # Dynamic tool availability table (only shows allowed tools)
+    parts.append(build_tool_availability_table(phase, allowed_tools))
 
     # Add mode decision matrix for exploitation/post-expl (only for CVE exploit path)
     if phase in ["exploitation", "post_exploitation"] and attack_path_type == "cve_exploit":
@@ -120,74 +113,86 @@ def get_phase_tools(
 
     # Add phase and ATTACK PATH specific workflow guidance
     if phase == "informational":
-        parts.append(INFORMATIONAL_TOOLS)  # Full tool descriptions with examples
+        # Dynamic tool descriptions (only shows allowed tools)
+        parts.append(build_informational_tool_descriptions(allowed_tools))
 
     elif phase == "exploitation":
-        # SELECT WORKFLOW BASED ON ATTACK PATH TYPE
-        if attack_path_type == "brute_force_credential_guess":
-            # Format with max attempts from params
-            parts.append(BRUTE_FORCE_CREDENTIAL_GUESS_TOOLS.format(
-                brute_force_max_attempts=get_setting('BRUTE_FORCE_MAX_WORDLIST_ATTEMPTS', 3),
-                bruteforce_speed=get_setting('BRUTEFORCE_SPEED', 5)
-            ))
-            # Add wordlist reference guide
-            parts.append(BRUTE_FORCE_CREDENTIAL_GUESS_WORDLIST_GUIDANCE)
-        else:
-            # CVE-based exploitation (default)
-            parts.append(CVE_EXPLOIT_TOOLS)
-            # Select payload guidance based on post_expl_type
-            payload_guidance = CVE_PAYLOAD_GUIDANCE_STATEFULL if is_statefull else CVE_PAYLOAD_GUIDANCE_STATELESS
-            parts.append(payload_guidance)
-            # No-module fallback when search returns no modules
-            if is_statefull:
-                parts.append(NO_MODULE_FALLBACK_STATEFULL)
+        # Only show exploitation workflows if metasploit_console is allowed
+        if "metasploit_console" in allowed_tools:
+            # SELECT WORKFLOW BASED ON ATTACK PATH TYPE
+            if attack_path_type == "brute_force_credential_guess":
+                # Format with max attempts from params
+                parts.append(BRUTE_FORCE_CREDENTIAL_GUESS_TOOLS.format(
+                    brute_force_max_attempts=get_setting('BRUTE_FORCE_MAX_WORDLIST_ATTEMPTS', 3),
+                    bruteforce_speed=get_setting('BRUTEFORCE_SPEED', 5)
+                ))
+                # Add wordlist reference guide
+                parts.append(BRUTE_FORCE_CREDENTIAL_GUESS_WORDLIST_GUIDANCE)
             else:
-                parts.append(NO_MODULE_FALLBACK_STATELESS)
-            # Add pre-configured session settings for statefull mode
-            # (AFTER fallback so agent sees LHOST/LPORT/BIND values)
-            if is_statefull:
-                session_config = get_session_config_prompt()
-                if session_config:
-                    parts.append(session_config)
+                # CVE-based exploitation (default)
+                parts.append(CVE_EXPLOIT_TOOLS)
+                # Select payload guidance based on post_expl_type
+                payload_guidance = CVE_PAYLOAD_GUIDANCE_STATEFULL if is_statefull else CVE_PAYLOAD_GUIDANCE_STATELESS
+                parts.append(payload_guidance)
+                # No-module fallback when search returns no modules
+                if is_statefull:
+                    parts.append(NO_MODULE_FALLBACK_STATEFULL)
+                else:
+                    parts.append(NO_MODULE_FALLBACK_STATELESS)
+                # Add pre-configured session settings for statefull mode
+                # (AFTER fallback so agent sees LHOST/LPORT/BIND values)
+                if is_statefull:
+                    session_config = get_session_config_prompt()
+                    if session_config:
+                        parts.append(session_config)
+        else:
+            # metasploit_console disabled — show only informational tool descriptions
+            parts.append(build_informational_tool_descriptions(allowed_tools))
 
         # Add note about post-exploitation availability
         if not activate_post_expl:
             parts.append("\n**NOTE:** Post-exploitation phase is DISABLED. Complete exploitation and use action='complete'.\n")
 
     elif phase == "post_exploitation":
-        # Select post-exploitation tools based on mode AND attack path
-        if is_statefull:
-            if attack_path_type == "brute_force_credential_guess":
-                # Shell session from SSH brute force
-                parts.append(POST_EXPLOITATION_TOOLS_SHELL)
+        # Only show post-exploitation workflows if metasploit_console is allowed
+        if "metasploit_console" in allowed_tools:
+            # Select post-exploitation tools based on mode AND attack path
+            if is_statefull:
+                if attack_path_type == "brute_force_credential_guess":
+                    # Shell session from SSH brute force
+                    parts.append(POST_EXPLOITATION_TOOLS_SHELL)
+                else:
+                    # Meterpreter session from CVE exploit
+                    parts.append(POST_EXPLOITATION_TOOLS_STATEFULL)
             else:
-                # Meterpreter session from CVE exploit
-                parts.append(POST_EXPLOITATION_TOOLS_STATEFULL)
+                parts.append(POST_EXPLOITATION_TOOLS_STATELESS)
         else:
-            parts.append(POST_EXPLOITATION_TOOLS_STATELESS)
+            # metasploit_console disabled — show only informational tool descriptions
+            parts.append(build_informational_tool_descriptions(allowed_tools))
 
     return "\n".join(parts)
 
 
 # Export list for explicit imports
 __all__ = [
+    # Tool registry and builders
+    "TOOL_REGISTRY",
+    "INTERNAL_TOOLS",
+    "build_tool_availability_table",
+    "build_informational_tool_descriptions",
+    "build_tool_args_section",
+    "build_tool_name_enum",
+    "build_phase_definitions",
+    "build_dynamic_rules",
     # Base prompts
-    "TOOL_AVAILABILITY",
     "MODE_DECISION_MATRIX",
-    "INFORMATIONAL_TOOLS",
     "METASPLOIT_CONSOLE_HEADER",
     "REACT_SYSTEM_PROMPT",
-    "OUTPUT_ANALYSIS_PROMPT",
     "PENDING_OUTPUT_ANALYSIS_SECTION",
     "PHASE_TRANSITION_MESSAGE",
     "USER_QUESTION_MESSAGE",
     "FINAL_REPORT_PROMPT",
-    "TOOL_SELECTION_SYSTEM",
-    "TOOL_SELECTION_PROMPT",
     "TEXT_TO_CYPHER_SYSTEM",
-    "TEXT_TO_CYPHER_PROMPT",
-    "FINAL_ANSWER_SYSTEM",
-    "FINAL_ANSWER_PROMPT",
     # Classification
     "ATTACK_PATH_CLASSIFICATION_PROMPT",
     # CVE exploit
@@ -203,10 +208,6 @@ __all__ = [
     "POST_EXPLOITATION_TOOLS_STATEFULL",
     "POST_EXPLOITATION_TOOLS_SHELL",
     "POST_EXPLOITATION_TOOLS_STATELESS",
-    # Backward compatibility
-    "EXPLOITATION_TOOLS",
-    "PAYLOAD_GUIDANCE_STATEFULL",
-    "PAYLOAD_GUIDANCE_STATELESS",
     # Function
     "get_phase_tools",
 ]
