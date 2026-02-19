@@ -47,7 +47,6 @@ from .brute_force_credential_guess_prompts import (
 # Re-export from post-exploitation prompts
 from .post_exploitation import (
     POST_EXPLOITATION_TOOLS_STATEFULL,
-    POST_EXPLOITATION_TOOLS_SHELL,
     POST_EXPLOITATION_TOOLS_STATELESS,
 )
 
@@ -156,14 +155,8 @@ def get_phase_tools(
     elif phase == "post_exploitation":
         # Only show post-exploitation workflows if metasploit_console is allowed
         if "metasploit_console" in allowed_tools:
-            # Select post-exploitation tools based on mode AND attack path
             if is_statefull:
-                if attack_path_type == "brute_force_credential_guess":
-                    # Shell session from SSH brute force
-                    parts.append(POST_EXPLOITATION_TOOLS_SHELL)
-                else:
-                    # Meterpreter session from CVE exploit
-                    parts.append(POST_EXPLOITATION_TOOLS_STATEFULL)
+                parts.append(POST_EXPLOITATION_TOOLS_STATEFULL)
             else:
                 parts.append(POST_EXPLOITATION_TOOLS_STATELESS)
         else:
@@ -206,7 +199,6 @@ __all__ = [
     "BRUTE_FORCE_CREDENTIAL_GUESS_WORDLIST_GUIDANCE",
     # Post-exploitation
     "POST_EXPLOITATION_TOOLS_STATEFULL",
-    "POST_EXPLOITATION_TOOLS_SHELL",
     "POST_EXPLOITATION_TOOLS_STATELESS",
     # Function
     "get_phase_tools",

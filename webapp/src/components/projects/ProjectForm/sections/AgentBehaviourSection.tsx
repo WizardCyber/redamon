@@ -320,6 +320,9 @@ export function AgentBehaviourSection({ data, updateField }: AgentBehaviourSecti
                 { id: 'execute_curl', label: 'execute_curl' },
                 { id: 'execute_naabu', label: 'execute_naabu' },
                 { id: 'execute_nmap', label: 'execute_nmap' },
+                { id: 'execute_nuclei', label: 'execute_nuclei' },
+                { id: 'kali_shell', label: 'kali_shell' },
+                { id: 'execute_code', label: 'execute_code' },
                 { id: 'metasploit_console', label: 'metasploit_console' },
                 { id: 'msf_restart', label: 'msf_restart' },
               ].map(tool => {

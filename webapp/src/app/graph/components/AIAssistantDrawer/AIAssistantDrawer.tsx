@@ -132,6 +132,7 @@ export function AIAssistantDrawer({
   const isProcessingQuestion = useRef(false)
   const awaitingQuestionRef = useRef(false)
   const shouldAutoScroll = useRef(true)
+  const itemIdCounter = useRef(0)
 
   const scrollToBottom = useCallback((force = false) => {
     if (force || shouldAutoScroll.current) {
@@ -198,7 +199,7 @@ export function AIAssistantDrawer({
         // Add thinking item to chat
         const thinkingItem: ThinkingItem = {
           type: 'thinking',
-          id: `thinking-${Date.now()}`,
+          id: `thinking-${Date.now()}-${itemIdCounter.current++}`,
           timestamp: new Date(),
           thought: message.payload.thought || '',
           reasoning: message.payload.reasoning || '',
@@ -214,7 +215,7 @@ export function AIAssistantDrawer({
         // Add tool execution item to chat
         const toolItem: ToolExecutionItem = {
           type: 'tool_execution',
-          id: `tool-${Date.now()}`,
+          id: `tool-${Date.now()}-${itemIdCounter.current++}`,
           timestamp: new Date(),
           tool_name: message.payload.tool_name,
           tool_args: message.payload.tool_args,

@@ -63,10 +63,12 @@ class MCPToolsManager:
         network_recon_url: str = None,
         nmap_url: str = None,
         metasploit_url: str = None,
+        nuclei_url: str = None,
     ):
         self.network_recon_url = network_recon_url or os.environ.get('MCP_NETWORK_RECON_URL', 'http://host.docker.internal:8000/sse')
         self.nmap_url = nmap_url or os.environ.get('MCP_NMAP_URL', 'http://host.docker.internal:8004/sse')
         self.metasploit_url = metasploit_url or os.environ.get('MCP_METASPLOIT_URL', 'http://host.docker.internal:8003/sse')
+        self.nuclei_url = nuclei_url or os.environ.get('MCP_NUCLEI_URL', 'http://host.docker.internal:8002/sse')
         self.client: Optional[MultiServerMCPClient] = None
         self._tools_cache: Dict[str, any] = {}
 
@@ -89,9 +91,10 @@ class MCPToolsManager:
         # - sse_read_timeout: How long to wait for SSE events (default 300s = 5 min)
         # Metasploit needs longer timeouts for brute force attacks (30 min for large wordlists)
         server_configs = [
-            ("network_recon", self.network_recon_url, 60, 600),   # curl+naabu, 10 min read
+            ("network_recon", self.network_recon_url, 60, 600),   # curl+naabu+command, 10 min read
             ("nmap", self.nmap_url, 60, 600),                     # 10 min read
             ("metasploit", self.metasploit_url, 60, 1800),        # 30 min read
+            ("nuclei", self.nuclei_url, 60, 600),                 # 10 min read
         ]
 
         for server_name, url, timeout, sse_read_timeout in server_configs:

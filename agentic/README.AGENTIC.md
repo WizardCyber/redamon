@@ -382,7 +382,7 @@ Based on the classified attack path, `get_phase_tools()` assembles different pro
 |-------|-----------------|------------------|
 | **Informational** | Standard recon tools | Standard recon tools |
 | **Exploitation** | `CVE_EXPLOIT_TOOLS` + payload guidance (statefull/stateless) | `BRUTE_FORCE_CREDENTIAL_GUESS_TOOLS` + wordlist guidance |
-| **Post-Exploitation** | `POST_EXPLOITATION_TOOLS_STATEFULL` (Meterpreter) | `POST_EXPLOITATION_TOOLS_SHELL` (SSH shell session) |
+| **Post-Exploitation** | `POST_EXPLOITATION_TOOLS_STATEFULL` (Meterpreter or Shell) | `POST_EXPLOITATION_TOOLS_STATEFULL` (same unified prompt) |
 
 ### Pre-Exploitation Validation
 

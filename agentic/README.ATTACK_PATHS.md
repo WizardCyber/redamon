@@ -1197,7 +1197,7 @@ Some attack paths naturally chain into others:
 
 ### Phase 3: Dynamic Post-Exploitation Handling (COMPLETED)
 - [x] Added `attack_path_type` to state (`AgentState`)
-- [x] Created `POST_EXPLOITATION_TOOLS_SHELL` for SSH brute force sessions
+- [x] Created unified `POST_EXPLOITATION_TOOLS_STATEFULL` for both Meterpreter and shell sessions
 - [x] Handle chains that don't have post-exploitation (DoS, Fuzzing) - TBD
 
 ### Phase 4: Attack Path Chaining

