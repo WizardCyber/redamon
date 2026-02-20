@@ -49,6 +49,8 @@ RUN apt-get install -y --fix-missing \
     perl \
     # Build dependencies for naabu (requires libpcap)
     libpcap-dev \
+    # Line ending conversion tool for Windows hosts
+    dos2unix \
     # Clean up
     && rm -rf /var/lib/apt/lists/*
 
@@ -86,7 +88,7 @@ COPY servers/ /opt/mcp_servers/
 
 # Copy and set entrypoint script
 COPY kali-sandbox/entrypoint.sh /opt/entrypoint.sh
-RUN chmod +x /opt/entrypoint.sh
+RUN dos2unix /opt/entrypoint.sh && chmod +x /opt/entrypoint.sh
 
 WORKDIR /opt/mcp_servers
 
